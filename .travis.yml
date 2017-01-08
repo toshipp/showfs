@@ -1,11 +1,12 @@
+sudo: required
 language: rust
 rust:
   - nightly
   - stable
 
 install:
-  - apt-get update
-  - apt-get -y install python3 libfuse-dev
+  - sudo apt-get update
+  - sudo apt-get -y install python3 libfuse-dev
 
 script:
   - ./tool/make_assets.py
