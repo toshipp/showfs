@@ -1,0 +1,9 @@
+language: rust
+rust:
+  - nightly
+  - stable
+
+script:
+  - ./tool/make_assets.py
+  - cargo test --verbose
+  - cargo build --verbose
