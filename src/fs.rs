@@ -67,7 +67,7 @@ pub trait File {
 
 pub trait Dir {
     fn open(&self) -> Result<Box<Iterator<Item = Result<Entry>>>>;
-    fn lookup(&self, name: &Path) -> Result<Entry>;
+    fn lookup(&self, name: &OsStr) -> Result<Entry>;
     fn getattr(&self) -> Result<FileAttr>;
     fn name(&self) -> &OsStr;
 }
@@ -248,15 +248,15 @@ impl ShowFS {
             }
         }
         self.entries.register_root(viewed_root);
-        Ok(fuse::mount(self, &target, &[]))
+        fuse::mount(self, &target, &[])
     }
 }
 
 impl Filesystem for ShowFS {
     // kernel path resolving function
-    fn lookup(&mut self, _req: &Request, parent: u64, name: &Path, reply: ReplyEntry) {
+    fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
         // check cache.
-        match self.entries.get_by_path(parent, name.as_os_str()) {
+        match self.entries.get_by_path(parent, name) {
             Some((ino, ent)) => {
                 match ent.getattr(ino) {
                     Ok(attr) => {

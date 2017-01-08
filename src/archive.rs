@@ -211,7 +211,7 @@ impl fs::Dir for Dir {
     fn open(&self) -> Result<Box<Iterator<Item = Result<fs::Entry>>>> {
         Ok(Box::new(DirHandler::open(self)?))
     }
-    fn lookup(&self, name: &Path) -> Result<fs::Entry> {
+    fn lookup(&self, name: &OsStr) -> Result<fs::Entry> {
         let lookup_path = self.path.join(name);
         let (mut r, exact) = find_entry(open(&**self.archive)?, &lookup_path)?;
         if !exact || isdir(r.entry()) {

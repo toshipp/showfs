@@ -8,7 +8,7 @@ use std::ffi::OsStr;
 use std::fs as stdfs;
 use std::io::Result;
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
-use std::path::{PathBuf, Path};
+use std::path::PathBuf;
 
 use fs;
 
@@ -50,7 +50,7 @@ impl fs::Dir for Dir {
             Box::new(DirHandler { iter: rd })
         })
     }
-    fn lookup(&self, name: &Path) -> Result<fs::Entry> {
+    fn lookup(&self, name: &OsStr) -> Result<fs::Entry> {
         let path = self.path.join(name);
         let m = stdfs::metadata(path.clone())?;
         if m.is_dir() {
