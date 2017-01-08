@@ -3,6 +3,10 @@ rust:
   - nightly
   - stable
 
+install:
+  - apt-get update
+  - apt-get -y install python3 libfuse-dev
+
 script:
   - ./tool/make_assets.py
   - cargo test --verbose
