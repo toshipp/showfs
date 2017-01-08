@@ -6,7 +6,7 @@ rust:
 
 install:
   - sudo apt-get update
-  - sudo apt-get -y install python3 libfuse-dev
+  - sudo apt-get -y install python3 libfuse-dev libarchive-dev
 
 script:
   - ./tool/make_assets.py
