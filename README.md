@@ -1,3 +1,5 @@
+[![Build Status](https://travis-ci.org/toshipp/showfs.svg?branch=master)](https://travis-ci.org/toshipp/showfs)
+
 showfs - mount an archive as a directory.
 -----------------------------------------
 
