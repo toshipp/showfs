@@ -3,22 +3,22 @@ extern crate libc;
 use std::io::{Read, Seek, SeekFrom, Result, Error};
 use std::cmp::min;
 
+const PAGE_SIZE: usize = 4096;
+
 pub struct BufferedReader<R: Read> {
     r: R,
     read_pos: usize,
+    size: usize,
     data: Vec<u8>,
-    rbuf: Vec<u8>,
 }
 
 impl<R: Read> BufferedReader<R> {
     pub fn new(r: R) -> BufferedReader<R> {
-        let mut rbuf = Vec::new();
-        rbuf.resize(1024 * 1024, 0);
         BufferedReader {
             r: r,
             read_pos: 0,
+            size: 0,
             data: Vec::new(),
-            rbuf: rbuf,
         }
     }
 }
@@ -38,23 +38,33 @@ impl<R: Read> Seek for BufferedReader<R> {
     }
 }
 
+fn round_to_page_size(n: usize) -> usize {
+    let mut n_page = n / PAGE_SIZE;
+    let remain = n % PAGE_SIZE;
+    if remain > 0 {
+        n_page += 1;
+    }
+    return n_page * PAGE_SIZE;
+}
+
 impl<R: Read> Read for BufferedReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
-        if self.read_pos >= self.data.len() {
-            let size = self.read_pos + buf.len() - self.data.len();
+        if self.read_pos >= self.size {
+            let want = round_to_page_size(self.read_pos + buf.len() - self.size);
             let mut read = 0;
-            while read < size {
-                match self.r.read(&mut self.rbuf) {
+            self.data.resize(self.size + want, 0);
+            while read < want {
+                match self.r.read(&mut self.data[self.size..]) {
                     Ok(n) if n == 0 => break,
                     Ok(n) => {
-                        self.data.extend_from_slice(&self.rbuf[..n]);
                         read += n;
+                        self.size += n;
                     }
                     e @ Err(_) => return e,
                 }
             }
         }
-        let l = min(self.data.len() - self.read_pos, buf.len());
+        let l = min(self.size - self.read_pos, buf.len());
         buf[..l].copy_from_slice(&self.data[self.read_pos..self.read_pos + l]);
         self.read_pos += l;
         Ok(l)
