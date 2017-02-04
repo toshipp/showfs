@@ -96,7 +96,7 @@ unsafe extern "C" fn skip_callback<R: SeekableRead>(raw: *mut ffi::Struct_archiv
     match proxy.skip(request) {
         Ok(n) => n,
         Err(e) => {
-            // collect?
+            // correct?
             set_error(raw, e);
             0
         }
@@ -118,7 +118,7 @@ unsafe extern "C" fn seek_callback<R: SeekableRead>(raw: *mut ffi::Struct_archiv
     match proxy.seek(pos) {
         Ok(n) => n as libc::int64_t,
         Err(e) => {
-            // collect?
+            // correct?
             set_error(raw, e);
             -1
         }
