@@ -10,6 +10,15 @@ use std::error::Error as STDError;
 use fs::{SeekableRead, SeekExt};
 use std::cmp::min;
 use std::path::PathBuf;
+use std::sync::{Once, ONCE_INIT};
+
+// libarchive needs locale to convert pathname.
+fn setlocale_once() {
+    static ONCE: Once = ONCE_INIT;
+    ONCE.call_once(|| unsafe {
+        libc::setlocale(libc::LC_ALL, CString::new("").unwrap().as_ptr());
+    });
+}
 
 struct Proxy<R: SeekableRead> {
     r: R,
@@ -118,6 +127,7 @@ unsafe extern "C" fn seek_callback<R: SeekableRead>(raw: *mut ffi::Struct_archiv
 
 impl<R: SeekableRead> Archive<R> {
     pub fn new(r: R) -> Self {
+        setlocale_once();
         unsafe {
             let raw = ffi::archive_read_new();
             if raw.is_null() {
@@ -176,7 +186,7 @@ impl<R: SeekableRead> Archive<R> {
                 }
                 ffi::ARCHIVE_RETRY => {
                     // failed but retryable.
-                    warn!("archive_read_next_header: {}",
+                    warn!("archive_read_next_header: {}, retry.",
                           unsafe { error_string(self.raw) });
                     continue;
                 }
@@ -292,7 +302,7 @@ impl<R: SeekableRead> Reader<R> {
                 }
                 ffi::ARCHIVE_RETRY => {
                     // failed but retryable.
-                    warn!("archive_read_data_block: {}",
+                    warn!("archive_read_data_block: {}, retry",
                           unsafe { error_string(self.a.raw) });
                     continue;
                 }
