@@ -2,6 +2,7 @@ extern crate libc;
 
 use std::io::{Read, Seek, SeekFrom, Result, Error};
 use std::cmp::min;
+use fs::SeekExt;
 
 const PAGE_SIZE: usize = 4096;
 
@@ -20,6 +21,12 @@ impl<R: Read> BufferedReader<R> {
             size: 0,
             data: Vec::new(),
         }
+    }
+}
+
+impl<R: Read> SeekExt for BufferedReader<R> {
+    fn bidirectional(&self) -> bool {
+        return true;
     }
 }
 

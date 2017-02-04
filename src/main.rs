@@ -10,6 +10,7 @@ mod archive;
 mod buffer;
 mod fs;
 mod physical;
+mod wrapper;
 
 fn main() {
     env_logger::init().unwrap();

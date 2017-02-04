@@ -21,7 +21,7 @@ use physical;
 
 macro_rules! error_with_log {
     ($reply:expr, $e:expr) => {{
-        debug!("{}:{}: {:?}", file!(), line!(), $e);
+        error!("{}:{}: {:?}", file!(), line!(), $e);
         $reply.error(to_cerr($e))
     }}
 }
@@ -29,8 +29,16 @@ macro_rules! error_with_log {
 // TODO: configurable?
 const TTL: Timespec = Timespec { sec: 1, nsec: 0 };
 
-pub trait SeekableRead: Seek + Read {}
-impl<T: Seek + Read> SeekableRead for T {}
+pub trait SeekExt {
+    fn bidirectional(&self) -> bool;
+}
+impl<S: SeekExt + ?Sized> SeekExt for Box<S> {
+    fn bidirectional(&self) -> bool {
+        (**self).bidirectional()
+    }
+}
+pub trait SeekableRead: Seek + SeekExt + Read {}
+impl<T: Seek + SeekExt + Read> SeekableRead for T {}
 
 pub enum Entry {
     File(Box<File>),
@@ -61,7 +69,7 @@ impl Entry {
 
 pub trait File {
     fn getattr(&self) -> Result<FileAttr>;
-    fn open(&self) -> Result<Box<SeekableRead>>;
+    fn open(&self, need_bidirectional: bool) -> Result<Box<SeekableRead>>;
     fn name(&self) -> &OsStr;
 }
 
@@ -330,7 +338,7 @@ impl Filesystem for ShowFS {
                 return;
             }
         };
-        match file.open() {
+        match file.open(true) {
             Ok(contents) => {
                 let fh = self.handlers.register_file(contents);
                 // flag can only be direct_io or keep_cache.
