@@ -7,7 +7,7 @@ use self::time::Timespec;
 use std::ffi::OsStr;
 use std::fs as stdfs;
 use std::io::Result;
-use std::os::unix::fs::{FileTypeExt, MetadataExt};
+use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::path::PathBuf;
 
 use fs;
@@ -131,7 +131,7 @@ fn to_fuse_file_attr(m: stdfs::Metadata) -> FileAttr {
         },
         crtime: Timespec { sec: 0, nsec: 0 }, // mac only
         kind: to_fuse_file_type(m.file_type()),
-        perm: m.mode() as u16 & 0o777,
+        perm: m.permissions().mode() as u16,
         nlink: m.nlink() as u32,
         uid: m.uid(),
         gid: m.gid(),

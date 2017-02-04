@@ -19,25 +19,15 @@ fn isdir(m: libc::mode_t) -> bool {
 }
 
 fn to_fuse_file_type(m: libc::mode_t) -> FileType {
-    if m & libc::S_IFLNK != 0 {
-        return FileType::Symlink;
+    match m & libc::S_IFMT {
+        libc::S_IFLNK => FileType::Symlink,
+        libc::S_IFREG => FileType::RegularFile,
+        libc::S_IFBLK => FileType::BlockDevice,
+        libc::S_IFDIR => FileType::Directory,
+        libc::S_IFCHR => FileType::CharDevice,
+        libc::S_IFIFO => FileType::NamedPipe,
+        _ => FileType::RegularFile,
     }
-    if m & libc::S_IFREG != 0 {
-        return FileType::RegularFile;
-    }
-    if m & libc::S_IFBLK != 0 {
-        return FileType::BlockDevice;
-    }
-    if m & libc::S_IFDIR != 0 {
-        return FileType::Directory;
-    }
-    if m & libc::S_IFCHR != 0 {
-        return FileType::CharDevice;
-    }
-    if m & libc::S_IFIFO != 0 {
-        return FileType::NamedPipe;
-    }
-    FileType::RegularFile
 }
 
 fn to_fuse_file_attr(s: libc::int64_t, m: libc::mode_t, a: FileAttr) -> FileAttr {
@@ -237,8 +227,9 @@ fn test_iterate_dir() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let zip = root.join("assets/test.zip");
     let zip_dir = Dir::new(Box::new(physical::File::new(zip)));
-    let mut names: Vec<PathBuf> =
-        zip_dir.open().unwrap().map(|re| PathBuf::from(re.unwrap().name())).collect();
+    let entries: Vec<_> = zip_dir.open().unwrap().map(|re| re.unwrap()).collect();
+    assert!(entries.iter().all(|e| e.file_type(0).unwrap() == FileType::RegularFile));
+    let mut names: Vec<_> = entries.iter().map(|e| PathBuf::from(e.name())).collect();
     names.sort();
     let expect = vec![PathBuf::from("large"), PathBuf::from("small")];
     assert_eq!(names, expect);
