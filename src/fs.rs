@@ -1,5 +1,4 @@
 extern crate libc;
-extern crate libarchive;
 extern crate fuse;
 extern crate time;
 

@@ -5,7 +5,6 @@ version = "0.0.1"
 authors = ["toshipp <toshiq2@gmail.com>"]
 
 [dependencies]
-libarchive = "*"
 libarchive3-sys = { git = "https://github.com/toshipp/libarchive3-sys", branch = "update-ffi" }
 time = "*"
 fuse = "*"
