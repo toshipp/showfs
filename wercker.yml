@@ -10,10 +10,16 @@ build:
           export PATH=~/.cargo/bin:$PATH
 
     - script:
-        name: test
+        name: test stable
         code: |
           ./tool/make_assets.py
           cargo test
+
+    - script:
+        name: test nightly
+        code: |
+          rustup install nightly
+          rustup run nightly cargo test
 
     - script:
         name: build
