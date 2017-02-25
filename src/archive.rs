@@ -208,8 +208,14 @@ fn file_to_archive(e: fs::Entry) -> fs::Entry {
 
 pub fn view_archive(e: &fs::Entry) -> Option<Box<Fn(fs::Entry) -> fs::Entry>> {
     if let &fs::Entry::File(ref f) = e {
-        let is_archive = match Path::new(f.name()).extension() {
-            Some(ext) if ext == "zip" || ext == "rar" => true,
+        let is_archive = match Path::new(f.name()).extension().and_then(|ext| ext.to_str()) {
+            Some(ext) => {
+                match ext.to_lowercase().as_str() {
+                    "zip" => true,
+                    "rar" => true,
+                    _ => false,
+                }
+            }
             _ => false,
         };
         if is_archive {
