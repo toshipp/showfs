@@ -9,21 +9,17 @@ use std::path::{PathBuf, Path};
 use std::rc::Rc;
 use std::vec::Vec;
 use std::cell::RefCell;
+use std::collections::HashSet;
 
 use fs;
-use fs::SeekableRead;
 mod wrapper;
 mod buffer;
 mod page;
 mod link;
 mod reader;
 
-fn isdir(m: libc::mode_t) -> bool {
-    m & libc::S_IFDIR != 0
-}
-
-fn to_fuse_file_type(m: libc::mode_t) -> FileType {
-    match m & libc::S_IFMT {
+fn to_fuse_file_type(file_type: libc::mode_t) -> FileType {
+    match file_type & libc::S_IFMT {
         libc::S_IFLNK => FileType::Symlink,
         libc::S_IFREG => FileType::RegularFile,
         libc::S_IFBLK => FileType::BlockDevice,
@@ -34,34 +30,36 @@ fn to_fuse_file_type(m: libc::mode_t) -> FileType {
     }
 }
 
-fn to_fuse_file_attr(s: libc::int64_t, m: libc::mode_t, a: FileAttr) -> FileAttr {
+fn to_fuse_file_attr(size: libc::int64_t, file_type: libc::mode_t, attr: FileAttr) -> FileAttr {
     FileAttr {
         ino: 0, // dummy
-        size: s as u64,
-        blocks: (s as u64 + 4095) / 4096,
-        atime: a.atime,
-        mtime: a.mtime,
-        ctime: a.ctime,
-        crtime: a.crtime, // mac only
-        kind: to_fuse_file_type(m),
-        perm: a.perm,
+        size: size as u64,
+        blocks: (size as u64 + 4095) / 4096,
+        atime: attr.atime,
+        mtime: attr.mtime,
+        ctime: attr.ctime,
+        crtime: attr.crtime, // mac only
+        kind: to_fuse_file_type(file_type),
+        perm: attr.perm,
         nlink: 0,
-        uid: a.uid,
-        gid: a.gid,
-        rdev: a.rdev,
+        uid: attr.uid,
+        gid: attr.gid,
+        rdev: attr.rdev,
         flags: 0, // mac only
     }
 }
 
 struct ArchivedFile {
     archive: Rc<Box<fs::File>>,
+    attr: FileAttr,
     path: PathBuf,
 }
 
 impl ArchivedFile {
-    fn new(archive: Rc<Box<fs::File>>, path: PathBuf) -> ArchivedFile {
+    fn new(archive: Rc<Box<fs::File>>, attr: FileAttr, path: PathBuf) -> ArchivedFile {
         ArchivedFile {
             archive: archive,
+            attr: attr,
             path: path,
         }
     }
@@ -69,14 +67,7 @@ impl ArchivedFile {
 
 impl fs::File for ArchivedFile {
     fn getattr(&self) -> Result<FileAttr> {
-        let archive_attr = self.archive.getattr()?;
-        let archive = wrapper::Archive::new(self.archive.open()?);
-        archive.find_map(|e| if e.pathname() == self.path {
-                Some(to_fuse_file_attr(e.size(), e.filetype(), archive_attr))
-            } else {
-                None
-            })
-            .unwrap_or(Err(Error::from_raw_os_error(libc::ENOENT)))
+        Ok(self.attr)
     }
 
     fn open(&self) -> Result<Box<fs::SeekableRead>> {
@@ -97,14 +88,11 @@ struct CacheFile {
 }
 
 impl CacheFile {
-    fn new(archive: Rc<Box<fs::File>>,
-           path: PathBuf,
-           page_manager: Rc<RefCell<page::PageManager>>)
-           -> CacheFile {
-        let f = Rc::new(ArchivedFile::new(archive, path));
+    fn new(file: ArchivedFile, page_manager: Rc<RefCell<page::PageManager>>) -> CacheFile {
+        let file = Rc::new(file);
         CacheFile {
-            cache: RefCell::new(reader::Cache::new(page_manager, f.clone())),
-            file: f,
+            cache: RefCell::new(reader::Cache::new(page_manager, file.clone())),
+            file: file,
         }
     }
 }
@@ -124,57 +112,132 @@ impl fs::File for CacheFile {
     }
 }
 
+struct DirEntry {
+    attr: FileAttr,
+    path: PathBuf,
+}
 
 pub struct Dir {
     archive: Rc<Box<fs::File>>,
     path: PathBuf,
+    attr: RefCell<Option<FileAttr>>,
+    dents: RefCell<Option<Rc<Vec<DirEntry>>>>,
     page_manager: Rc<RefCell<page::PageManager>>,
 }
 
 impl Dir {
     pub fn new(f: Box<fs::File>, page_manager: Rc<RefCell<page::PageManager>>) -> Self {
-        Dir::new_for_path(Rc::new(f), PathBuf::new(), page_manager)
-    }
-    fn new_for_path(f: Rc<Box<fs::File>>,
-                    path: PathBuf,
-                    page_manager: Rc<RefCell<page::PageManager>>)
-                    -> Self {
         Dir {
-            archive: f,
-            path: path,
+            archive: Rc::new(f),
+            path: PathBuf::new(),
+            attr: RefCell::new(None),
+            dents: RefCell::new(None),
             page_manager: page_manager,
         }
+    }
+
+    fn from_dent(f: Rc<Box<fs::File>>,
+                 dent: &DirEntry,
+                 dents: Rc<Vec<DirEntry>>,
+                 page_manager: Rc<RefCell<page::PageManager>>)
+                 -> Self {
+        Dir {
+            archive: f,
+            path: dent.path.clone(),
+            attr: RefCell::new(Some(dent.attr)),
+            dents: RefCell::new(Some(dents)),
+            page_manager: page_manager,
+        }
+    }
+
+    fn update_cache(&self) -> Result<()> {
+        use fs::Dir;
+        if self.dents.borrow().is_some() {
+            return Ok(());
+        }
+        let self_attr = self.getattr()?;
+        let mut archive = wrapper::Archive::new(self.archive.open()?);
+        let mut dents = Vec::new();
+        let mut dirs = HashSet::new();
+        loop {
+            match archive.next_entry() {
+                Some(Ok(ent)) => {
+                    let path = ent.pathname();
+                    let attr = to_fuse_file_attr(ent.size(), ent.filetype(), self_attr);
+                    {
+                        let mut parent = path.parent();
+                        while parent.is_some() {
+                            let path = parent.unwrap();
+                            if !dirs.insert(PathBuf::from(path)) {
+                                dents.push(DirEntry {
+                                    attr: self_attr,
+                                    path: PathBuf::from(path),
+                                });
+                            }
+                            parent = path.parent();
+                        }
+                    }
+                    if attr.kind != FileType::Directory || !dirs.insert(path.clone()) {
+                        dents.push(DirEntry {
+                            attr: attr,
+                            path: path,
+                        });
+                    }
+                }
+                Some(Err(e)) => return Err(e),
+                None => break,
+            }
+        }
+        *self.dents.borrow_mut() = Some(Rc::new(dents));
+        Ok(())
     }
 }
 
 impl fs::Dir for Dir {
     fn open(&self) -> Result<Box<Iterator<Item = Result<fs::Entry>>>> {
-        Ok(Box::new(DirHandler::open(self)?))
+        self.update_cache()?;
+        Ok(Box::new(DirHandler::open(self)))
     }
+
     fn lookup(&self, name: &OsStr) -> Result<fs::Entry> {
+        self.update_cache()?;
         let lookup_path = self.path.join(name);
-        let archive = wrapper::Archive::new(self.archive.open()?);
-        archive.find_map(|e| if let Ok(sub) = e.pathname().strip_prefix(lookup_path.as_path()) {
-                if sub.as_os_str().is_empty() && !isdir(e.filetype()) {
-                    Some(fs::Entry::File(Box::new(CacheFile::new(self.archive.clone(),
-                                                                 lookup_path.clone(),
-                                                                 self.page_manager.clone()))))
+        for e in self.dents.borrow().as_ref().unwrap().iter() {
+            if e.path == lookup_path {
+                if e.attr.kind != FileType::Directory {
+                    return Ok(fs::Entry::File(Box::new(CacheFile::new(
+                        ArchivedFile::new(
+                            self.archive.clone(),
+                            e.attr,
+                            lookup_path.clone()),
+                        self.page_manager.clone()))));
                 } else {
-                    Some(fs::Entry::Dir(Box::new(Dir::new_for_path(self.archive.clone(),
-                                                                   lookup_path.clone(),
-                                                                   self.page_manager.clone()))))
+                    return Ok(fs::Entry::Dir(Box::new(Dir {
+                        archive: self.archive.clone(),
+                        path: lookup_path.clone(),
+                        attr: RefCell::new(Some(e.attr)),
+                        dents: self.dents.clone(),
+                        page_manager: self.page_manager
+                            .clone(),
+                    })));
                 }
-            } else {
-                None
-            })
-            .unwrap_or(Err(Error::from_raw_os_error(libc::ENOENT)))
+            }
+        }
+        Err(Error::from_raw_os_error(libc::ENOENT))
     }
+
     fn getattr(&self) -> Result<FileAttr> {
-        self.archive.getattr().map(|mut attr| {
-            attr.kind = FileType::Directory;
-            attr
-        })
+        if self.attr.borrow().is_none() {
+            *self.attr.borrow_mut() = Some(self.archive
+                .getattr()
+                .map(|mut attr| {
+                    attr.kind = FileType::Directory;
+                    attr
+                })?);
+        }
+        Ok(self.attr.borrow().unwrap())
     }
+
     fn name(&self) -> &OsStr {
         if self.path.as_os_str().is_empty() {
             self.archive.name()
@@ -187,20 +250,20 @@ impl fs::Dir for Dir {
 struct DirHandler {
     archive: Rc<Box<fs::File>>,
     path: PathBuf,
-    dirs: Vec<PathBuf>,
-    a: wrapper::Archive<Box<SeekableRead>>,
+    dents: Rc<Vec<DirEntry>>,
+    i: usize,
     page_manager: Rc<RefCell<page::PageManager>>,
 }
 
 impl DirHandler {
-    fn open(dir: &Dir) -> Result<Self> {
-        Ok(DirHandler {
+    fn open(dir: &Dir) -> Self {
+        DirHandler {
             archive: dir.archive.clone(),
             path: dir.path.clone(),
-            dirs: Vec::new(),
-            a: wrapper::Archive::new(dir.archive.open()?),
+            dents: dir.dents.borrow().as_ref().unwrap().clone(),
+            i: 0,
             page_manager: dir.page_manager.clone(),
-        })
+        }
     }
 }
 
@@ -208,39 +271,35 @@ impl Iterator for DirHandler {
     type Item = Result<fs::Entry>;
 
     fn next(&mut self) -> Option<Result<fs::Entry>> {
-        loop {
-            match self.a.next_entry() {
-                Some(Ok(e)) => {
-                    let path = e.pathname();
-                    debug!("pathname {:?}", path);
-                    if let Ok(sub) = path.strip_prefix(self.path.as_path()) {
-                        if sub.as_os_str().is_empty() {
-                            continue;
-                        }
-                        let mut iter = sub.iter();
-                        let name = iter.next().unwrap();
-                        let isdir = iter.next().is_some() || isdir(e.filetype());
-                        if !isdir {
-                            return Some(Ok(fs::Entry::File(Box::new(CacheFile::new(self.archive
-                                                                                  .clone(),
-                                                                              self.path
-                                                                                   .join(name),
-                                                                                   self.page_manager.clone())))));
-                        }
-                        if self.dirs.iter().find(|n| n.as_os_str() == name).is_some() {
-                            continue;
-                        }
-                        self.dirs.push(PathBuf::from(name));
-                        return Some(Ok(fs::Entry::Dir(Box::new(Dir::new_for_path(
+        let dents = self.dents.as_ref();
+        while self.i < dents.len() {
+            let e = &dents[self.i];
+            self.i += 1;
+            if let Ok(sub) = e.path.strip_prefix(self.path.as_path()) {
+                let mut iter = sub.iter();
+                let name = match iter.next() {
+                    Some(name) => name,
+                    None => continue,
+                };
+                if iter.next().is_some() || e.attr.kind == FileType::Directory {
+                    return Some(Ok(fs::Entry::Dir(Box::new(Dir::from_dent(self.archive
+                                                                              .clone(),
+                                                                          e,
+                                                                          self.dents
+                                                                              .clone(),
+                                                                          self.page_manager
+                                                                              .clone())))));
+                } else {
+                    return Some(Ok(fs::Entry::File(Box::new(CacheFile::new(
+                        ArchivedFile::new(
                             self.archive.clone(),
-                            self.path.join(name),
+                            e.attr,
+                            self.path.join(name)),
                         self.page_manager.clone())))));
-                    }
                 }
-                Some(Err(e)) => return Some(Err(e)),
-                None => return None,
             }
         }
+        None
     }
 }
 
@@ -291,7 +350,7 @@ fn test_iterate_dir() {
     use physical;
     use fs::Dir as FSDir;
 
-    let page_manager = Rc::new(RefCell::new(page::PageManager::new(100*1024*1024).unwrap()));
+    let page_manager = Rc::new(RefCell::new(page::PageManager::new(100 * 1024 * 1024).unwrap()));
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let zip = root.join("assets/test.zip");
     let zip_dir = Dir::new(Box::new(physical::File::new(zip)), page_manager.clone());

@@ -170,22 +170,6 @@ impl<R: SeekableRead> Archive<R> {
         self.next_entry_raw().map(|r| r.map(|e| RefEntry::new(e)))
     }
 
-    pub fn find_map<F, T>(mut self, f: F) -> Option<Result<T>>
-        where F: Fn(&Entry) -> Option<T>
-    {
-        loop {
-            match self.next_entry_raw() {
-                Some(Ok(e)) => {
-                    if let Some(x) = f(&e) {
-                        return Some(Ok(x));
-                    }
-                }
-                Some(Err(e)) => return Some(Err(e)),
-                None => return None,
-            }
-        }
-    }
-
     pub fn find_open<P>(mut self, p: P) -> Option<Result<Reader<R>>>
         where P: Fn(&Entry) -> bool
     {
