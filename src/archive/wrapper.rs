@@ -7,17 +7,12 @@ use std::marker;
 use std::ptr;
 use std::io::{Result, Error, SeekFrom, Read, Seek, ErrorKind};
 use std::error::Error as STDError;
-use fs::{SeekableRead, SeekExt};
+use fs::SeekableRead;
 use std::cmp::min;
 use std::path::PathBuf;
-use std::sync::{Once, ONCE_INIT};
 
-// libarchive needs locale to convert pathname.
-fn setlocale_once() {
-    static ONCE: Once = ONCE_INIT;
-    ONCE.call_once(|| unsafe {
-        libc::setlocale(libc::LC_ALL, CString::new("").unwrap().as_ptr());
-    });
+pub fn initialize() {
+    unsafe { libc::setlocale(libc::LC_ALL, CString::new("").unwrap().as_ptr()) };
 }
 
 struct Proxy<R: SeekableRead> {
@@ -46,13 +41,6 @@ impl<R: SeekableRead> Proxy<R> {
     fn seek(&mut self, pos: SeekFrom) -> Result<u64> {
         self.pos = self.r.seek(pos)?;
         Ok(self.pos)
-    }
-
-    fn skip(&mut self, request: libc::int64_t) -> Result<libc::int64_t> {
-        let now = self.r.seek(SeekFrom::Current(request))?;
-        let skip = now - self.pos;
-        self.pos = now;
-        Ok(skip as libc::int64_t)
     }
 }
 
@@ -88,21 +76,6 @@ unsafe extern "C" fn read_callback<R: SeekableRead>(raw: *mut ffi::Struct_archiv
     -1
 }
 
-unsafe extern "C" fn skip_callback<R: SeekableRead>(raw: *mut ffi::Struct_archive,
-                                                    client_data: *mut libc::c_void,
-                                                    request: libc::int64_t)
-                                                    -> libc::int64_t {
-    let proxy = (client_data as *mut Proxy<R>).as_mut().unwrap();
-    match proxy.skip(request) {
-        Ok(n) => n,
-        Err(e) => {
-            // correct?
-            set_error(raw, e);
-            0
-        }
-    }
-}
-
 unsafe extern "C" fn seek_callback<R: SeekableRead>(raw: *mut ffi::Struct_archive,
                                                     client_data: *mut libc::c_void,
                                                     offset: libc::int64_t,
@@ -127,7 +100,6 @@ unsafe extern "C" fn seek_callback<R: SeekableRead>(raw: *mut ffi::Struct_archiv
 
 impl<R: SeekableRead> Archive<R> {
     pub fn new(r: R) -> Self {
-        setlocale_once();
         unsafe {
             let raw = ffi::archive_read_new();
             if raw.is_null() {
@@ -139,16 +111,9 @@ impl<R: SeekableRead> Archive<R> {
             if ffi::archive_read_support_filter_all(raw) != ffi::ARCHIVE_OK {
                 panic!("not support filter");
             }
-            if r.bidirectional() {
-                if ffi::archive_read_set_seek_callback(raw, Some(seek_callback::<R>)) !=
-                   ffi::ARCHIVE_OK {
-                    panic!("failed to set seek");
-                }
-            } else {
-                if ffi::archive_read_set_skip_callback(raw, Some(skip_callback::<R>)) !=
-                   ffi::ARCHIVE_OK {
-                    panic!("failed to set skip");
-                }
+            if ffi::archive_read_set_seek_callback(raw, Some(seek_callback::<R>)) !=
+               ffi::ARCHIVE_OK {
+                panic!("failed to set seek");
             }
             let proxy = Box::into_raw(Box::new(Proxy::new(r)));
             if ffi::archive_read_open(raw,
@@ -316,12 +281,6 @@ impl<R: SeekableRead> Reader<R> {
     }
 }
 
-impl<R: SeekableRead> SeekExt for Reader<R> {
-    fn bidirectional(&self) -> bool {
-        return false;
-    }
-}
-
 impl<R: SeekableRead> Read for Reader<R> {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
         self.read_data_block()?;
@@ -344,7 +303,7 @@ impl<R: SeekableRead> Seek for Reader<R> {
     fn seek(&mut self, pos: SeekFrom) -> Result<u64> {
         match pos {
             SeekFrom::Start(n) => self.read_pos = n as usize,
-            SeekFrom::End(n) => unimplemented!(),
+            SeekFrom::End(_) => unimplemented!(),
             SeekFrom::Current(n) => self.read_pos += n as usize,
         }
         Ok(self.read_pos as u64)

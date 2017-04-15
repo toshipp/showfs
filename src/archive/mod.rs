@@ -8,11 +8,15 @@ use std::io::{Result, Error};
 use std::path::{PathBuf, Path};
 use std::rc::Rc;
 use std::vec::Vec;
+use std::cell::RefCell;
 
 use fs;
 use fs::SeekableRead;
-use wrapper;
-use buffer;
+mod wrapper;
+mod buffer;
+mod page;
+mod link;
+mod reader;
 
 fn isdir(m: libc::mode_t) -> bool {
     m & libc::S_IFDIR != 0
@@ -49,24 +53,24 @@ fn to_fuse_file_attr(s: libc::int64_t, m: libc::mode_t, a: FileAttr) -> FileAttr
     }
 }
 
-struct File {
+struct ArchivedFile {
     archive: Rc<Box<fs::File>>,
     path: PathBuf,
 }
 
-impl File {
-    fn new(archive: Rc<Box<fs::File>>, path: PathBuf) -> File {
-        File {
+impl ArchivedFile {
+    fn new(archive: Rc<Box<fs::File>>, path: PathBuf) -> ArchivedFile {
+        ArchivedFile {
             archive: archive,
             path: path,
         }
     }
 }
 
-impl fs::File for File {
+impl fs::File for ArchivedFile {
     fn getattr(&self) -> Result<FileAttr> {
         let archive_attr = self.archive.getattr()?;
-        let archive = wrapper::Archive::new(self.archive.open(false)?);
+        let archive = wrapper::Archive::new(self.archive.open()?);
         archive.find_map(|e| if e.pathname() == self.path {
                 Some(to_fuse_file_attr(e.size(), e.filetype(), archive_attr))
             } else {
@@ -75,15 +79,11 @@ impl fs::File for File {
             .unwrap_or(Err(Error::from_raw_os_error(libc::ENOENT)))
     }
 
-    fn open(&self, need_bidirectional: bool) -> Result<Box<fs::SeekableRead>> {
-        let archive = wrapper::Archive::new(self.archive.open(false)?);
+    fn open(&self) -> Result<Box<fs::SeekableRead>> {
+        let archive = wrapper::Archive::new(self.archive.open()?);
         let reader = archive.find_open(|e| e.pathname() == self.path)
             .unwrap_or(Err(Error::from_raw_os_error(libc::ENOENT)))?;
-        if need_bidirectional {
-            Ok(Box::new(buffer::BufferedReader::new(reader)))
-        } else {
-            Ok(Box::new(reader))
-        }
+        Ok(Box::new(reader))
     }
 
     fn name(&self) -> &OsStr {
@@ -91,19 +91,58 @@ impl fs::File for File {
     }
 }
 
+struct CacheFile {
+    cache: RefCell<reader::Cache>,
+    file: Rc<ArchivedFile>,
+}
+
+impl CacheFile {
+    fn new(archive: Rc<Box<fs::File>>,
+           path: PathBuf,
+           page_manager: Rc<RefCell<page::PageManager>>)
+           -> CacheFile {
+        let f = Rc::new(ArchivedFile::new(archive, path));
+        CacheFile {
+            cache: RefCell::new(reader::Cache::new(page_manager, f.clone())),
+            file: f,
+        }
+    }
+}
+
+
+impl fs::File for CacheFile {
+    fn getattr(&self) -> Result<FileAttr> {
+        self.file.getattr()
+    }
+
+    fn open(&self) -> Result<Box<fs::SeekableRead>> {
+        self.cache.borrow_mut().make_reader()
+    }
+
+    fn name(&self) -> &OsStr {
+        self.file.name()
+    }
+}
+
+
 pub struct Dir {
     archive: Rc<Box<fs::File>>,
     path: PathBuf,
+    page_manager: Rc<RefCell<page::PageManager>>,
 }
 
 impl Dir {
-    pub fn new(f: Box<fs::File>) -> Self {
-        Dir::new_for_path(Rc::new(f), PathBuf::new())
+    pub fn new(f: Box<fs::File>, page_manager: Rc<RefCell<page::PageManager>>) -> Self {
+        Dir::new_for_path(Rc::new(f), PathBuf::new(), page_manager)
     }
-    fn new_for_path(f: Rc<Box<fs::File>>, path: PathBuf) -> Self {
+    fn new_for_path(f: Rc<Box<fs::File>>,
+                    path: PathBuf,
+                    page_manager: Rc<RefCell<page::PageManager>>)
+                    -> Self {
         Dir {
             archive: f,
             path: path,
+            page_manager: page_manager,
         }
     }
 }
@@ -114,14 +153,16 @@ impl fs::Dir for Dir {
     }
     fn lookup(&self, name: &OsStr) -> Result<fs::Entry> {
         let lookup_path = self.path.join(name);
-        let archive = wrapper::Archive::new(self.archive.open(false)?);
+        let archive = wrapper::Archive::new(self.archive.open()?);
         archive.find_map(|e| if let Ok(sub) = e.pathname().strip_prefix(lookup_path.as_path()) {
                 if sub.as_os_str().is_empty() && !isdir(e.filetype()) {
-                    Some(fs::Entry::File(Box::new(File::new(self.archive.clone(),
-                                                            lookup_path.clone()))))
+                    Some(fs::Entry::File(Box::new(CacheFile::new(self.archive.clone(),
+                                                                 lookup_path.clone(),
+                                                                 self.page_manager.clone()))))
                 } else {
                     Some(fs::Entry::Dir(Box::new(Dir::new_for_path(self.archive.clone(),
-                                                                   lookup_path.clone()))))
+                                                                   lookup_path.clone(),
+                                                                   self.page_manager.clone()))))
                 }
             } else {
                 None
@@ -148,6 +189,7 @@ struct DirHandler {
     path: PathBuf,
     dirs: Vec<PathBuf>,
     a: wrapper::Archive<Box<SeekableRead>>,
+    page_manager: Rc<RefCell<page::PageManager>>,
 }
 
 impl DirHandler {
@@ -156,7 +198,8 @@ impl DirHandler {
             archive: dir.archive.clone(),
             path: dir.path.clone(),
             dirs: Vec::new(),
-            a: wrapper::Archive::new(dir.archive.open(false)?),
+            a: wrapper::Archive::new(dir.archive.open()?),
+            page_manager: dir.page_manager.clone(),
         })
     }
 }
@@ -178,10 +221,11 @@ impl Iterator for DirHandler {
                         let name = iter.next().unwrap();
                         let isdir = iter.next().is_some() || isdir(e.filetype());
                         if !isdir {
-                            return Some(Ok(fs::Entry::File(Box::new(File::new(self.archive
+                            return Some(Ok(fs::Entry::File(Box::new(CacheFile::new(self.archive
                                                                                   .clone(),
                                                                               self.path
-                                                                                  .join(name))))));
+                                                                                   .join(name),
+                                                                                   self.page_manager.clone())))));
                         }
                         if self.dirs.iter().find(|n| n.as_os_str() == name).is_some() {
                             continue;
@@ -189,7 +233,8 @@ impl Iterator for DirHandler {
                         self.dirs.push(PathBuf::from(name));
                         return Some(Ok(fs::Entry::Dir(Box::new(Dir::new_for_path(
                             self.archive.clone(),
-                            self.path.join(name))))));
+                            self.path.join(name),
+                        self.page_manager.clone())))));
                     }
                 }
                 Some(Err(e)) => return Some(Err(e)),
@@ -199,40 +244,57 @@ impl Iterator for DirHandler {
     }
 }
 
-fn file_to_archive(e: fs::Entry) -> fs::Entry {
-    if let fs::Entry::File(f) = e {
-        return fs::Entry::Dir(Box::new(Dir::new(f)));
-    }
-    panic!("invalid entry");
+pub struct ArchiveViewer {
+    page_manager: Rc<RefCell<page::PageManager>>,
 }
 
-pub fn view_archive(e: &fs::Entry) -> Option<Box<Fn(fs::Entry) -> fs::Entry>> {
-    if let &fs::Entry::File(ref f) = e {
-        let is_archive = match Path::new(f.name()).extension().and_then(|ext| ext.to_str()) {
-            Some(ext) => {
-                match ext.to_lowercase().as_str() {
-                    "zip" => true,
-                    "rar" => true,
+impl ArchiveViewer {
+    pub fn new(max_bytes: usize) -> Result<ArchiveViewer> {
+        wrapper::initialize();
+        Ok(ArchiveViewer {
+            page_manager: Rc::new(RefCell::new(page::PageManager::new(max_bytes)?)),
+        })
+    }
+}
+
+impl fs::Viewer for ArchiveViewer {
+    fn view(&self, e: fs::Entry) -> fs::Entry {
+        let is_archive = match e {
+            fs::Entry::File(ref f) => {
+                match Path::new(f.name())
+                    .extension()
+                    .and_then(|ext| ext.to_str()) {
+                    Some(ext) => {
+                        match ext.to_lowercase().as_str() {
+                            "zip" => true,
+                            "rar" => true,
+                            _ => false,
+                        }
+                    }
                     _ => false,
                 }
             }
             _ => false,
         };
         if is_archive {
-            return Some(Box::new(file_to_archive));
+            if let fs::Entry::File(f) = e {
+                return fs::Entry::Dir(Box::new(Dir::new(f, self.page_manager.clone())));
+            }
         }
+        e
     }
-    None
 }
+
 
 #[test]
 fn test_iterate_dir() {
     use physical;
     use fs::Dir as FSDir;
 
+    let page_manager = Rc::new(RefCell::new(page::PageManager::new(100*1024*1024).unwrap()));
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let zip = root.join("assets/test.zip");
-    let zip_dir = Dir::new(Box::new(physical::File::new(zip)));
+    let zip_dir = Dir::new(Box::new(physical::File::new(zip)), page_manager.clone());
     let entries: Vec<_> = zip_dir.open().unwrap().map(|re| re.unwrap()).collect();
     assert!(entries.iter().all(|e| e.file_type(0).unwrap() == FileType::RegularFile));
     let mut names: Vec<_> = entries.iter().map(|e| PathBuf::from(e.name())).collect();
@@ -252,7 +314,7 @@ fn test_file_read() {
     let zip = assets.join("test.zip");
     let zip_file = physical::File::new(zip);
     let read_archive = |name| {
-        let archive = wrapper::Archive::new(zip_file.open(false).unwrap());
+        let archive = wrapper::Archive::new(zip_file.open().unwrap());
         let mut r = archive.find_open(|e| e.pathname() == PathBuf::from(name)).unwrap().unwrap();
         let mut v = Vec::<u8>::new();
         r.read_to_end(&mut v).unwrap();

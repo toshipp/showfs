@@ -6,11 +6,9 @@ extern crate log;
 use std::iter::FromIterator;
 use std::vec::Vec;
 
-mod archive;
-mod buffer;
 mod fs;
+mod archive;
 mod physical;
-mod wrapper;
 
 fn main() {
     env_logger::init().unwrap();
@@ -18,7 +16,8 @@ fn main() {
     let ref target = args[1];
     let ref mountpoint = args[2];
     let mut fs = fs::ShowFS::new(target);
-    fs.register_viewer(archive::view_archive);
+    let max_cache = 1024 * 1024 * 1024;
+    fs.register_viewer(archive::ArchiveViewer::new(max_cache).unwrap());
     let result = fs.mount(mountpoint);
     result.unwrap();
 }

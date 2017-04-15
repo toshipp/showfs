@@ -12,12 +12,6 @@ use std::path::PathBuf;
 
 use fs;
 
-impl fs::SeekExt for stdfs::File {
-    fn bidirectional(&self) -> bool {
-        return true;
-    }
-}
-
 pub struct File {
     path: PathBuf,
 }
@@ -32,7 +26,7 @@ impl fs::File for File {
     fn getattr(&self) -> Result<FileAttr> {
         stdfs::metadata(self.path.clone()).map(|m| to_fuse_file_attr(m))
     }
-    fn open(&self, _: bool) -> Result<Box<fs::SeekableRead>> {
+    fn open(&self) -> Result<Box<fs::SeekableRead>> {
         Ok(Box::new(stdfs::File::open(&self.path)?))
     }
     fn name(&self) -> &OsStr {

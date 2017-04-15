@@ -28,16 +28,8 @@ macro_rules! error_with_log {
 // TODO: configurable?
 const TTL: Timespec = Timespec { sec: 1, nsec: 0 };
 
-pub trait SeekExt {
-    fn bidirectional(&self) -> bool;
-}
-impl<S: SeekExt + ?Sized> SeekExt for Box<S> {
-    fn bidirectional(&self) -> bool {
-        (**self).bidirectional()
-    }
-}
-pub trait SeekableRead: Seek + SeekExt + Read {}
-impl<T: Seek + SeekExt + Read> SeekableRead for T {}
+pub trait SeekableRead: Seek + Read {}
+impl<T: Seek + Read> SeekableRead for T {}
 
 pub enum Entry {
     File(Box<File>),
@@ -68,7 +60,7 @@ impl Entry {
 
 pub trait File {
     fn getattr(&self) -> Result<FileAttr>;
-    fn open(&self, need_bidirectional: bool) -> Result<Box<SeekableRead>>;
+    fn open(&self) -> Result<Box<SeekableRead>>;
     fn name(&self) -> &OsStr;
 }
 
@@ -183,27 +175,27 @@ impl HandlerHolder {
     }
 }
 
-#[derive(Clone)]
-struct Viewer {
-    viewers: Rc<Vec<Box<Fn(&Entry) -> Option<Box<Fn(Entry) -> Entry>>>>>,
+pub trait Viewer {
+    fn view(&self, e: Entry) -> Entry;
 }
 
-impl Viewer {
-    fn new() -> Viewer {
-        Viewer { viewers: Rc::new(Vec::new()) }
+struct CompositeViewer {
+    viewers: Vec<Box<Viewer>>,
+}
+
+impl CompositeViewer {
+    fn new() -> CompositeViewer {
+        CompositeViewer { viewers: Vec::new() }
     }
 
-    fn register<F>(&mut self, view: F)
-        where F: Fn(&Entry) -> Option<Box<Fn(Entry) -> Entry>> + 'static
-    {
-        Rc::get_mut(&mut self.viewers).unwrap().push(Box::new(view))
+    fn add<V: Viewer + 'static>(&mut self, v: V) {
+        self.viewers.push(Box::new(v))
     }
 
-    fn viewed_as(&self, e: Entry) -> Entry {
-        for ref checker in self.viewers.iter() {
-            if let Some(view) = checker(&e) {
-                return view(e);
-            }
+    fn view(&self, e: Entry) -> Entry {
+        let mut e = e;
+        for viewer in self.viewers.iter() {
+            e = viewer.view(e);
         }
         e
     }
@@ -213,7 +205,7 @@ pub struct ShowFS {
     origin: PathBuf,
     entries: EntryHolder,
     handlers: HandlerHolder,
-    viewer: Viewer,
+    viewers: Rc<CompositeViewer>,
     buf: Vec<u8>,
 }
 
@@ -225,16 +217,13 @@ impl ShowFS {
             origin: origin.as_ref().to_path_buf(),
             entries: EntryHolder::new(),
             handlers: HandlerHolder::new(),
-            viewer: Viewer::new(),
+            viewers: Rc::new(CompositeViewer::new()),
             buf: Vec::new(),
         }
     }
 
-    pub fn register_viewer<F>(&mut self, viewer: F) -> &mut ShowFS
-        where F: Fn(&Entry) -> Option<Box<Fn(Entry) -> Entry>> + 'static
-    {
-        self.viewer.register(viewer);
-        self
+    pub fn register_viewer<V: Viewer + 'static>(&mut self, v: V) {
+        Rc::get_mut(&mut self.viewers).unwrap().add(v)
     }
 
     pub fn mount<P>(mut self, target: P) -> Result<()>
@@ -245,7 +234,7 @@ impl ShowFS {
         } else {
             Entry::File(Box::new(physical::File::new(self.origin.clone())))
         };
-        let viewed_root = self.viewer.viewed_as(root);
+        let viewed_root = self.viewers.view(root);
         match viewed_root {
             Entry::Dir(_) if fs::metadata(target.as_ref())?.is_dir() => {
                 // fallthrough
@@ -292,7 +281,7 @@ impl Filesystem for ShowFS {
         let attr = match ret_ent {
             Ok(ent) => {
                 let ir = self.entries.reserve_inode();
-                let ent = self.viewer.viewed_as(ent);
+                let ent = self.viewers.view(ent);
                 let attr = ent.getattr(ir.inode());
                 self.entries.register_with(parent, ent, ir);
                 attr
@@ -337,7 +326,7 @@ impl Filesystem for ShowFS {
                 return;
             }
         };
-        match file.open(true) {
+        match file.open() {
             Ok(contents) => {
                 let fh = self.handlers.register_file(contents);
                 // flag can only be direct_io or keep_cache.
@@ -411,9 +400,9 @@ impl Filesystem for ShowFS {
         };
         match handler {
             Ok(dh) => {
-                let viewer = self.viewer.clone();
+                let viewer = self.viewers.clone();
                 let fh = self.handlers
-                    .register_dir(dh.map(move |re| re.map(|e| viewer.viewed_as(e))));
+                    .register_dir(dh.map(move |re| re.map(|e| viewer.view(e))));
                 reply.opened(fh, 0);
             }
             Err(e) => error_with_log!(reply, e),
