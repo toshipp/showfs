@@ -268,7 +268,10 @@ impl AllocatedPage {
     fn update_lru(&mut self) {
         unsafe {
             self.lru.unlink();
-            self.lru_head.as_mut().unwrap().push_front(&mut self.lru);
+            self.lru_head
+                .as_mut()
+                .unwrap()
+                .push_front(&mut self.lru);
         }
     }
 }
@@ -336,10 +339,10 @@ impl PageAllocator {
             list.push_front(free_page.link());
         }
         Ok(PageAllocator {
-            page: buffer,
-            free_list: list,
-            free_count: max_pages,
-        })
+               page: buffer,
+               free_list: list,
+               free_count: max_pages,
+           })
     }
 
     fn free_pages(&self) -> usize {
@@ -369,7 +372,8 @@ impl Allocator for PageAllocator {
                     return;
                 }
             }
-            self.free_list.push_front(FreePage::from_page(page, 1).link())
+            self.free_list
+                .push_front(FreePage::from_page(page, 1).link())
         }
     }
 }
@@ -383,9 +387,9 @@ impl PageManager {
     pub fn new(max_bytes: usize) -> Result<PageManager> {
         let max_pages = (max_bytes + PAGE_SIZE - 1) / PAGE_SIZE;
         Ok(PageManager {
-            use_page_lru: link::LinkHead::new(),
-            allocator: PageAllocator::new(max_pages)?,
-        })
+               use_page_lru: link::LinkHead::new(),
+               allocator: PageAllocator::new(max_pages)?,
+           })
     }
 
     pub fn allocate(&mut self, bytes: usize) -> Option<WeakRefPage> {
@@ -443,10 +447,7 @@ pub struct RefPage {
 impl RefPage {
     fn new(page: Rc<RefCell<*mut AllocatedPage>>) -> RefPage {
         unsafe {
-            page.borrow_mut()
-                .as_mut()
-                .unwrap()
-                .inc_use();
+            page.borrow_mut().as_mut().unwrap().inc_use();
         }
         RefPage { page: page }
     }
@@ -485,11 +486,7 @@ impl RefPage {
 impl Drop for RefPage {
     fn drop(&mut self) {
         unsafe {
-            self.page
-                .borrow_mut()
-                .as_mut()
-                .unwrap()
-                .dec_use();
+            self.page.borrow_mut().as_mut().unwrap().dec_use();
         }
     }
 }

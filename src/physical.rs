@@ -47,8 +47,8 @@ impl Dir {
 impl fs::Dir for Dir {
     fn open(&self) -> Result<Box<Iterator<Item = Result<fs::Entry>>>> {
         stdfs::read_dir(&self.path).map(|rd| -> Box<Iterator<Item = Result<fs::Entry>>> {
-            Box::new(DirHandler { iter: rd })
-        })
+                                            Box::new(DirHandler { iter: rd })
+                                        })
     }
     fn lookup(&self, name: &OsStr) -> Result<fs::Entry> {
         let path = self.path.join(name);

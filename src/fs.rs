@@ -43,9 +43,9 @@ impl Entry {
             &Entry::Dir(ref d) => d.getattr(),
         };
         attr.map(|mut a| {
-            a.ino = ino;
-            a
-        })
+                     a.ino = ino;
+                     a
+                 })
     }
     pub fn name(&self) -> &OsStr {
         match self {
@@ -114,7 +114,8 @@ impl EntryHolder {
     }
     fn register_with(&mut self, parent: u64, ent: Entry, ir: InodeReserver) {
         debug!("register {:?} with {}", ent.name(), ir.inode);
-        self.path_to_inode.insert((parent, ent.name().to_os_string()), ir.inode);
+        self.path_to_inode
+            .insert((parent, ent.name().to_os_string()), ir.inode);
         self.inode_to_entry.insert(ir.inode, ent);
     }
     fn register_root(&mut self, root: Entry) {

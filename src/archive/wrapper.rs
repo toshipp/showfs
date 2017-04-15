@@ -56,7 +56,10 @@ unsafe fn set_error(raw: *mut ffi::Struct_archive, e: Error) {
 }
 
 unsafe fn error_string(raw: *mut ffi::Struct_archive) -> String {
-    CStr::from_ptr(ffi::archive_error_string(raw)).to_str().unwrap().to_string()
+    CStr::from_ptr(ffi::archive_error_string(raw))
+        .to_str()
+        .unwrap()
+        .to_string()
 }
 
 unsafe extern "C" fn read_callback<R: SeekableRead>(raw: *mut ffi::Struct_archive,
@@ -167,7 +170,8 @@ impl<R: SeekableRead> Archive<R> {
     }
 
     pub fn next_entry<'a>(&'a mut self) -> Option<Result<RefEntry<'a, R>>> {
-        self.next_entry_raw().map(|r| r.map(|e| RefEntry::new(e)))
+        self.next_entry_raw()
+            .map(|r| r.map(|e| RefEntry::new(e)))
     }
 
     pub fn find_open<P>(mut self, p: P) -> Option<Result<Reader<R>>>
@@ -234,11 +238,11 @@ impl<R: SeekableRead> Reader<R> {
 
         while self.offset as usize + self.buf_size as usize <= self.read_pos {
             match unsafe {
-                ffi::archive_read_data_block(self.a.raw,
-                                             &mut self.buf,
-                                             &mut self.buf_size,
-                                             &mut self.offset)
-            } {
+                      ffi::archive_read_data_block(self.a.raw,
+                                                   &mut self.buf,
+                                                   &mut self.buf_size,
+                                                   &mut self.offset)
+                  } {
                 ffi::ARCHIVE_OK => continue,
                 ffi::ARCHIVE_WARN => {
                     warn!("archive_read_data_block: {}",

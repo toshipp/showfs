@@ -12,10 +12,7 @@ impl<T> Link<T> {
     pub unsafe fn unlink(&mut self) {
         let prev = self.prev;
         prev.as_mut().unwrap().next = self.next;
-        self.next
-            .as_mut()
-            .unwrap()
-            .prev = prev;
+        self.next.as_mut().unwrap().prev = prev;
         self.prev = ptr::null_mut();
         self.next = ptr::null_mut();
     }
@@ -87,10 +84,7 @@ impl<'a, T> Iterator for IterReverseMut<'a, T> {
         }
         let curr = self.link;
         unsafe {
-            self.link = self.link
-                .as_mut()
-                .unwrap()
-                .prev;
+            self.link = self.link.as_mut().unwrap().prev;
             Some(transmute(curr))
         }
     }
@@ -125,10 +119,7 @@ fn test_link() {
 
         assert_eq!(l.front_mut().unwrap().value, 2);
 
-        l.front_mut()
-            .unwrap()
-            .link
-            .unlink();
+        l.front_mut().unwrap().link.unlink();
         assert_eq!(l.front_mut().unwrap().value, 1);
 
         use std::vec::Vec;
