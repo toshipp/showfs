@@ -56,10 +56,12 @@ unsafe fn set_error(raw: *mut ffi::Struct_archive, e: Error) {
 }
 
 unsafe fn error_string(raw: *mut ffi::Struct_archive) -> String {
-    CStr::from_ptr(ffi::archive_error_string(raw))
-        .to_str()
-        .unwrap()
-        .to_string()
+    let p = ffi::archive_error_string(raw);
+    if p.is_null() {
+        "unknown".to_string()
+    } else {
+        CStr::from_ptr(p).to_str().unwrap().to_string()
+    }
 }
 
 unsafe extern "C" fn read_callback<R: SeekableRead>(raw: *mut ffi::Struct_archive,
