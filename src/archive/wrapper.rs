@@ -264,6 +264,10 @@ impl<R: SeekableRead> Reader<R> {
                 ffi::ARCHIVE_FATAL => {
                     return Err(Error::new(ErrorKind::Other, unsafe { error_string(self.a.raw) }));
                 }
+                n if n < 0 => {
+                    return Err(Error::new(ErrorKind::Other,
+                                          format!("unknown error {} from libarchive", n)));
+                }
                 _ => unreachable!(),
             }
         }
