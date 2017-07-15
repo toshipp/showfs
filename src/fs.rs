@@ -20,8 +20,13 @@ use physical;
 
 macro_rules! error_with_log {
     ($reply:expr, $e:expr) => {{
-        error!("{}:{}: {:?}", file!(), line!(), $e);
-        $reply.error(to_cerr($e))
+        let cerr = to_cerr(&$e);
+        if cerr == libc::ENOENT {
+            warn!("{}:{}: {:?}", file!(), line!(), $e);
+        } else {
+            error!("{}:{}: {:?}", file!(), line!(), $e);
+        }
+        $reply.error(cerr)
     }}
 }
 
@@ -71,7 +76,7 @@ pub trait Dir {
     fn name(&self) -> &OsStr;
 }
 
-fn to_cerr(e: Error) -> libc::c_int {
+fn to_cerr(e: &Error) -> libc::c_int {
     match e.raw_os_error() {
         Some(raw) => raw,
         None => libc::EIO,
