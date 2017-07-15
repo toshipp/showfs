@@ -64,10 +64,11 @@ unsafe fn error_string(raw: *mut ffi::Struct_archive) -> String {
     }
 }
 
-unsafe extern "C" fn read_callback<R: SeekableRead>(raw: *mut ffi::Struct_archive,
-                                                    client_data: *mut libc::c_void,
-                                                    buffer: *mut *const libc::c_void)
-                                                    -> libc::ssize_t {
+unsafe extern "C" fn read_callback<R: SeekableRead>(
+    raw: *mut ffi::Struct_archive,
+    client_data: *mut libc::c_void,
+    buffer: *mut *const libc::c_void,
+) -> libc::ssize_t {
     let proxy = (client_data as *mut Proxy<R>).as_mut().unwrap();
     let err;
     match proxy.read() {
@@ -81,11 +82,12 @@ unsafe extern "C" fn read_callback<R: SeekableRead>(raw: *mut ffi::Struct_archiv
     -1
 }
 
-unsafe extern "C" fn seek_callback<R: SeekableRead>(raw: *mut ffi::Struct_archive,
-                                                    client_data: *mut libc::c_void,
-                                                    offset: libc::int64_t,
-                                                    whence: libc::c_int)
-                                                    -> libc::int64_t {
+unsafe extern "C" fn seek_callback<R: SeekableRead>(
+    raw: *mut ffi::Struct_archive,
+    client_data: *mut libc::c_void,
+    offset: libc::int64_t,
+    whence: libc::c_int,
+) -> libc::int64_t {
     let proxy = (client_data as *mut Proxy<R>).as_mut().unwrap();
     let pos = match whence {
         libc::SEEK_SET => SeekFrom::Start(offset as u64),
@@ -117,15 +119,19 @@ impl<R: SeekableRead> Archive<R> {
                 panic!("not support filter");
             }
             if ffi::archive_read_set_seek_callback(raw, Some(seek_callback::<R>)) !=
-               ffi::ARCHIVE_OK {
+                ffi::ARCHIVE_OK
+            {
                 panic!("failed to set seek");
             }
             let proxy = Box::into_raw(Box::new(Proxy::new(r)));
-            if ffi::archive_read_open(raw,
-                                      proxy as *mut libc::c_void,
-                                      None,
-                                      Some(read_callback::<R>),
-                                      None) != ffi::ARCHIVE_OK {
+            if ffi::archive_read_open(
+                raw,
+                proxy as *mut libc::c_void,
+                None,
+                Some(read_callback::<R>),
+                None,
+            ) != ffi::ARCHIVE_OK
+            {
                 panic!("failed to open");
             }
             Archive {
@@ -146,8 +152,9 @@ impl<R: SeekableRead> Archive<R> {
             match unsafe { ffi::archive_read_next_header(self.raw, &mut entry) } {
                 ffi::ARCHIVE_OK => break,
                 ffi::ARCHIVE_WARN => {
-                    warn!("archive_read_next_header: {}",
-                          unsafe { error_string(self.raw) });
+                    warn!("archive_read_next_header: {}", unsafe {
+                        error_string(self.raw)
+                    });
                     break;
                 }
                 ffi::ARCHIVE_EOF => {
@@ -156,13 +163,16 @@ impl<R: SeekableRead> Archive<R> {
                 }
                 ffi::ARCHIVE_RETRY => {
                     // failed but retryable.
-                    warn!("archive_read_next_header: {}, retry.",
-                          unsafe { error_string(self.raw) });
+                    warn!("archive_read_next_header: {}, retry.", unsafe {
+                        error_string(self.raw)
+                    });
                     continue;
                 }
                 ffi::ARCHIVE_FATAL => {
-                    return Some(Err(Error::new(ErrorKind::Other,
-                                               unsafe { error_string(self.raw) })));
+                    return Some(Err(Error::new(
+                        ErrorKind::Other,
+                        unsafe { error_string(self.raw) },
+                    )));
                 }
                 _ => unreachable!(),
             }
@@ -172,12 +182,12 @@ impl<R: SeekableRead> Archive<R> {
     }
 
     pub fn next_entry<'a>(&'a mut self) -> Option<Result<RefEntry<'a, R>>> {
-        self.next_entry_raw()
-            .map(|r| r.map(|e| RefEntry::new(e)))
+        self.next_entry_raw().map(|r| r.map(|e| RefEntry::new(e)))
     }
 
     pub fn find_open<P>(mut self, p: P) -> Option<Result<Reader<R>>>
-        where P: Fn(&Entry) -> bool
+    where
+        P: Fn(&Entry) -> bool,
     {
         loop {
             match self.next_entry_raw() {
@@ -240,15 +250,18 @@ impl<R: SeekableRead> Reader<R> {
 
         while self.offset as usize + self.buf_size as usize <= self.read_pos {
             match unsafe {
-                      ffi::archive_read_data_block(self.a.raw,
-                                                   &mut self.buf,
-                                                   &mut self.buf_size,
-                                                   &mut self.offset)
-                  } {
+                ffi::archive_read_data_block(
+                    self.a.raw,
+                    &mut self.buf,
+                    &mut self.buf_size,
+                    &mut self.offset,
+                )
+            } {
                 ffi::ARCHIVE_OK => continue,
                 ffi::ARCHIVE_WARN => {
-                    warn!("archive_read_data_block: {}",
-                          unsafe { error_string(self.a.raw) });
+                    warn!("archive_read_data_block: {}", unsafe {
+                        error_string(self.a.raw)
+                    });
                     continue;
                 }
                 ffi::ARCHIVE_EOF => {
@@ -257,16 +270,22 @@ impl<R: SeekableRead> Reader<R> {
                 }
                 ffi::ARCHIVE_RETRY => {
                     // failed but retryable.
-                    warn!("archive_read_data_block: {}, retry",
-                          unsafe { error_string(self.a.raw) });
+                    warn!("archive_read_data_block: {}, retry", unsafe {
+                        error_string(self.a.raw)
+                    });
                     continue;
                 }
                 ffi::ARCHIVE_FATAL => {
-                    return Err(Error::new(ErrorKind::Other, unsafe { error_string(self.a.raw) }));
+                    return Err(Error::new(
+                        ErrorKind::Other,
+                        unsafe { error_string(self.a.raw) },
+                    ));
                 }
                 n if n < 0 => {
-                    return Err(Error::new(ErrorKind::Other,
-                                          format!("unknown error {} from libarchive", n)));
+                    return Err(Error::new(
+                        ErrorKind::Other,
+                        format!("unknown error {} from libarchive", n),
+                    ));
                 }
                 _ => unreachable!(),
             }

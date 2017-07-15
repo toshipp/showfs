@@ -72,8 +72,11 @@ impl fs::File for ArchivedFile {
 
     fn open(&self) -> Result<Box<fs::SeekableRead>> {
         let archive = wrapper::Archive::new(self.archive.open()?);
-        let reader = archive.find_open(|e| e.pathname() == self.path)
-            .unwrap_or(Err(Error::from_raw_os_error(libc::ENOENT)))?;
+        let reader = archive.find_open(|e| e.pathname() == self.path).unwrap_or(
+            Err(
+                Error::from_raw_os_error(libc::ENOENT),
+            ),
+        )?;
         Ok(Box::new(reader))
     }
 
@@ -136,12 +139,13 @@ impl Dir {
         }
     }
 
-    fn from_parts(f: Rc<Box<fs::File>>,
-                  path: PathBuf,
-                  attr: FileAttr,
-                  dents: Rc<Vec<DirEntry>>,
-                  page_manager: Rc<RefCell<page::PageManager>>)
-                  -> Self {
+    fn from_parts(
+        f: Rc<Box<fs::File>>,
+        path: PathBuf,
+        attr: FileAttr,
+        dents: Rc<Vec<DirEntry>>,
+        page_manager: Rc<RefCell<page::PageManager>>,
+    ) -> Self {
         Dir {
             archive: f,
             path: path,
@@ -206,22 +210,22 @@ impl fs::Dir for Dir {
         for e in self.dents.borrow().as_ref().unwrap().iter() {
             if e.path == lookup_path {
                 if e.attr.kind == FileType::Directory {
-                    return Ok(fs::Entry::Dir(Box::new(Dir::from_parts(self.archive.clone(),
-                                                                      lookup_path.clone(),
-                                                                      e.attr,
-                                                                      self.dents
-                                                                          .borrow()
-                                                                          .as_ref()
-                                                                          .unwrap()
-                                                                          .clone(),
-                                                                      self.page_manager.clone()))));
+                    return Ok(fs::Entry::Dir(Box::new(Dir::from_parts(
+                        self.archive.clone(),
+                        lookup_path.clone(),
+                        e.attr,
+                        self.dents.borrow().as_ref().unwrap().clone(),
+                        self.page_manager.clone(),
+                    ))));
                 } else {
                     return Ok(fs::Entry::File(Box::new(CacheFile::new(
                         ArchivedFile::new(
                             self.archive.clone(),
                             e.attr,
-                            lookup_path.clone()),
-                        self.page_manager.clone()))));
+                            lookup_path.clone(),
+                        ),
+                        self.page_manager.clone(),
+                    ))));
                 }
             }
         }
@@ -277,19 +281,19 @@ impl Iterator for DirHandler {
             match e.path.parent() {
                 Some(parent) if parent == self.path => {
                     if e.attr.kind == FileType::Directory {
-                        let dir = Dir::from_parts(self.archive
-                                                      .clone(),
-                                                  e.path.clone(),
-                                                  e.attr,
-                                                  self.dents.clone(),
-                                                  self.page_manager
-                                                      .clone());
+                        let dir = Dir::from_parts(
+                            self.archive.clone(),
+                            e.path.clone(),
+                            e.attr,
+                            self.dents.clone(),
+                            self.page_manager.clone(),
+                        );
                         return Some(Ok(fs::Entry::Dir(Box::new(dir))));
                     } else {
-                        let file = CacheFile::new(ArchivedFile::new(self.archive.clone(),
-                                                                    e.attr,
-                                                                    e.path.clone()),
-                                                  self.page_manager.clone());
+                        let file = CacheFile::new(
+                            ArchivedFile::new(self.archive.clone(), e.attr, e.path.clone()),
+                            self.page_manager.clone(),
+                        );
                         return Some(Ok(fs::Entry::File(Box::new(file))));
                     }
                 }
@@ -317,9 +321,7 @@ impl fs::Viewer for ArchiveViewer {
     fn view(&self, e: fs::Entry) -> fs::Entry {
         let is_archive = match e {
             fs::Entry::File(ref f) => {
-                match Path::new(f.name())
-                    .extension()
-                    .and_then(|ext| ext.to_str()) {
+                match Path::new(f.name()).extension().and_then(|ext| ext.to_str()) {
                     Some(ext) => {
                         match ext.to_lowercase().as_str() {
                             "zip" => true,
@@ -347,16 +349,17 @@ fn test_iterate_dir() {
     use physical;
     use fs::Dir as FSDir;
 
-    let page_manager = Rc::new(RefCell::new(page::PageManager::new(100 * 1024 * 1024).unwrap()));
+    let page_manager = Rc::new(RefCell::new(
+        page::PageManager::new(100 * 1024 * 1024).unwrap(),
+    ));
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let zip = root.join("assets/test.zip");
     let zip_dir = Dir::new(Box::new(physical::File::new(zip)), page_manager.clone());
     let entries: Vec<_> = zip_dir.open().unwrap().map(|re| re.unwrap()).collect();
-    assert!(entries.iter()
-        .all(|e| e.file_type(0).unwrap() == FileType::RegularFile));
-    let mut names: Vec<_> = entries.iter()
-        .map(|e| PathBuf::from(e.name()))
-        .collect();
+    assert!(entries.iter().all(|e| {
+        e.file_type(0).unwrap() == FileType::RegularFile
+    }));
+    let mut names: Vec<_> = entries.iter().map(|e| PathBuf::from(e.name())).collect();
     names.sort();
     let expect = vec![PathBuf::from("large"), PathBuf::from("small")];
     assert_eq!(names, expect);
@@ -374,7 +377,8 @@ fn test_file_read() {
     let zip_file = physical::File::new(zip);
     let read_archive = |name| {
         let archive = wrapper::Archive::new(zip_file.open().unwrap());
-        let mut r = archive.find_open(|e| e.pathname() == PathBuf::from(name))
+        let mut r = archive
+            .find_open(|e| e.pathname() == PathBuf::from(name))
             .unwrap()
             .unwrap();
         let mut v = Vec::<u8>::new();

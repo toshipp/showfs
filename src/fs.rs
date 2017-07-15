@@ -43,9 +43,9 @@ impl Entry {
             &Entry::Dir(ref d) => d.getattr(),
         };
         attr.map(|mut a| {
-                     a.ino = ino;
-                     a
-                 })
+            a.ino = ino;
+            a
+        })
     }
     pub fn name(&self) -> &OsStr {
         match self {
@@ -114,8 +114,10 @@ impl EntryHolder {
     }
     fn register_with(&mut self, parent: u64, ent: Entry, ir: InodeReserver) {
         debug!("register {:?} with {}", ent.name(), ir.inode);
-        self.path_to_inode
-            .insert((parent, ent.name().to_os_string()), ir.inode);
+        self.path_to_inode.insert(
+            (parent, ent.name().to_os_string()),
+            ir.inode,
+        );
         self.inode_to_entry.insert(ir.inode, ent);
     }
     fn register_root(&mut self, root: Entry) {
@@ -148,7 +150,8 @@ impl HandlerHolder {
         return fh;
     }
     fn register_dir<I>(&mut self, iter: I) -> u64
-        where I: Iterator<Item = Result<Entry>> + 'static
+    where
+        I: Iterator<Item = Result<Entry>> + 'static,
     {
         let fh = self.fh;
         self.fh += 1;
@@ -162,9 +165,10 @@ impl HandlerHolder {
     fn get_file_mut(&mut self, fh: u64) -> Option<&mut Box<SeekableRead>> {
         self.file_handlers.get_mut(&fh)
     }
-    fn get_dir_mut(&mut self,
-                   fh: u64)
-                   -> Option<&mut iter::Peekable<Box<Iterator<Item = Result<Entry>>>>> {
+    fn get_dir_mut(
+        &mut self,
+        fh: u64,
+    ) -> Option<&mut iter::Peekable<Box<Iterator<Item = Result<Entry>>>>> {
         self.dir_handlers.get_mut(&fh)
     }
     fn release_file(&mut self, fh: u64) {
@@ -212,7 +216,8 @@ pub struct ShowFS {
 
 impl ShowFS {
     pub fn new<P>(origin: P) -> ShowFS
-        where P: AsRef<Path>
+    where
+        P: AsRef<Path>,
     {
         ShowFS {
             origin: origin.as_ref().to_path_buf(),
@@ -228,7 +233,8 @@ impl ShowFS {
     }
 
     pub fn mount<P>(mut self, target: P) -> Result<()>
-        where P: AsRef<Path>
+    where
+        P: AsRef<Path>,
     {
         let root = if fs::metadata(self.origin.clone())?.is_dir() {
             Entry::Dir(Box::new(physical::Dir::new(self.origin.clone())))
@@ -241,7 +247,10 @@ impl ShowFS {
                 // fallthrough
             }
             _ => {
-                return Err(Error::new(ErrorKind::InvalidInput, "invalid origin or mountpoint"));
+                return Err(Error::new(
+                    ErrorKind::InvalidInput,
+                    "invalid origin or mountpoint",
+                ));
             }
         }
         self.entries.register_root(viewed_root);
@@ -338,14 +347,16 @@ impl Filesystem for ShowFS {
     }
 
     // called when all opened fds are closed.
-    fn release(&mut self,
-               _req: &Request,
-               _ino: u64,
-               fh: u64,
-               _flags: u32,
-               _lock_owner: u64,
-               _flush: bool,
-               reply: ReplyEmpty) {
+    fn release(
+        &mut self,
+        _req: &Request,
+        _ino: u64,
+        fh: u64,
+        _flags: u32,
+        _lock_owner: u64,
+        _flush: bool,
+        reply: ReplyEmpty,
+    ) {
         if self.handlers.get_file(fh).is_none() {
             reply.error(libc::EBADF);
             return;
@@ -354,13 +365,15 @@ impl Filesystem for ShowFS {
         reply.ok();
     }
 
-    fn read(&mut self,
-            _req: &Request,
-            _ino: u64,
-            fh: u64,
-            offset: u64,
-            size: u32,
-            reply: ReplyData) {
+    fn read(
+        &mut self,
+        _req: &Request,
+        _ino: u64,
+        fh: u64,
+        offset: u64,
+        size: u32,
+        reply: ReplyData,
+    ) {
         if let Some(reader) = self.handlers.get_file_mut(fh) {
             if let Err(e) = reader.seek(SeekFrom::Start(offset)) {
                 error_with_log!(reply, e);
@@ -402,8 +415,9 @@ impl Filesystem for ShowFS {
         match handler {
             Ok(dh) => {
                 let viewer = self.viewers.clone();
-                let fh = self.handlers
-                    .register_dir(dh.map(move |re| re.map(|e| viewer.view(e))));
+                let fh = self.handlers.register_dir(
+                    dh.map(move |re| re.map(|e| viewer.view(e))),
+                );
                 reply.opened(fh, 0);
             }
             Err(e) => error_with_log!(reply, e),
@@ -419,12 +433,14 @@ impl Filesystem for ShowFS {
         }
     }
 
-    fn readdir(&mut self,
-               _req: &Request,
-               ino: u64,
-               fh: u64,
-               offset: u64,
-               mut reply: ReplyDirectory) {
+    fn readdir(
+        &mut self,
+        _req: &Request,
+        ino: u64,
+        fh: u64,
+        offset: u64,
+        mut reply: ReplyDirectory,
+    ) {
         let h = match self.handlers.get_dir_mut(fh) {
             Some(h) => h,
             None => {

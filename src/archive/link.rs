@@ -68,7 +68,8 @@ impl<T> LinkHead<T> {
 }
 
 pub struct IterReverseMut<'a, T>
-    where T: 'a
+where
+    T: 'a,
 {
     link: *mut Link<T>,
     end: *mut Link<T>,

@@ -94,8 +94,6 @@ impl AllocatedPage {
     }
 
     unsafe fn allocate_and_set_pages_one<A: Allocator>(map: &mut [u32], allocator: &mut A) {
-        /// allocate full pages to fill map and set them to map.
-        /// if allocator can not allocate pages, this panics.
         for x in map.iter_mut() {
             let page = allocator.allocate().expect("oom");
             *x = allocator.base().calc_offset(page);
@@ -112,10 +110,11 @@ impl AllocatedPage {
         }
     }
 
-    unsafe fn allocate<A: Allocator>(bytes: usize,
-                                     lru_head: &mut link::LinkHead<AllocatedPage>,
-                                     allocator: &mut A)
-                                     -> WeakRefPage {
+    unsafe fn allocate<A: Allocator>(
+        bytes: usize,
+        lru_head: &mut link::LinkHead<AllocatedPage>,
+        allocator: &mut A,
+    ) -> WeakRefPage {
         /// if allocator can not allocate memory, this panics.
         let (data_pages, rel_map_pages) = AllocatedPage::calc_page_count(bytes);
         let map_len = if rel_map_pages > 0 {
@@ -127,15 +126,17 @@ impl AllocatedPage {
         let header_p = allocator.allocate().expect("oom").raw() as *mut AllocatedPage;
         let referencer = Rc::new(RefCell::new(header_p));
         let header = header_p.as_mut().unwrap();
-        mem::forget(mem::replace(header,
-                                 AllocatedPage {
-                                     lru: link::Link::default(),
-                                     lru_head: lru_head,
-                                     referencer: referencer.clone(),
-                                     base: allocator.base(),
-                                     data_pages: data_pages as u32,
-                                     use_count: 0,
-                                 }));
+        mem::forget(mem::replace(
+            header,
+            AllocatedPage {
+                lru: link::Link::default(),
+                lru_head: lru_head,
+                referencer: referencer.clone(),
+                base: allocator.base(),
+                data_pages: data_pages as u32,
+                use_count: 0,
+            },
+        ));
         lru_head.push_front(header.lru());
 
         // first level
@@ -202,14 +203,18 @@ impl AllocatedPage {
 
     unsafe fn embed_as_slice<T>(&self) -> &[T] {
         let p: *const u8 = mem::transmute(self);
-        slice_from_raw_pointer(p.offset(mem::size_of::<AllocatedPage>() as isize),
-                               AllocatedPage::embed_size())
+        slice_from_raw_pointer(
+            p.offset(mem::size_of::<AllocatedPage>() as isize),
+            AllocatedPage::embed_size(),
+        )
     }
 
     unsafe fn embed_as_slice_mut<T>(&mut self) -> &mut [T] {
         let p: *mut u8 = mem::transmute(self);
-        slice_from_raw_pointer_mut(p.offset(mem::size_of::<AllocatedPage>() as isize),
-                                   AllocatedPage::embed_size())
+        slice_from_raw_pointer_mut(
+            p.offset(mem::size_of::<AllocatedPage>() as isize),
+            AllocatedPage::embed_size(),
+        )
     }
 
     unsafe fn map(&self) -> &[u32] {
@@ -268,10 +273,7 @@ impl AllocatedPage {
     fn update_lru(&mut self) {
         unsafe {
             self.lru.unlink();
-            self.lru_head
-                .as_mut()
-                .unwrap()
-                .push_front(&mut self.lru);
+            self.lru_head.as_mut().unwrap().push_front(&mut self.lru);
         }
     }
 }
@@ -290,11 +292,13 @@ impl FreePage {
         let last = top.offset((count - 1) as u32);
         let p: *mut FreePage = mem::transmute(last.raw());
         let p = p.as_mut().unwrap();
-        mem::forget(mem::replace(p,
-                                 FreePage {
-                                     link: link::Link::default(),
-                                     count: count,
-                                 }));
+        mem::forget(mem::replace(
+            p,
+            FreePage {
+                link: link::Link::default(),
+                count: count,
+            },
+        ));
         p
     }
 
@@ -339,10 +343,10 @@ impl PageAllocator {
             list.push_front(free_page.link());
         }
         Ok(PageAllocator {
-               page: buffer,
-               free_list: list,
-               free_count: max_pages,
-           })
+            page: buffer,
+            free_list: list,
+            free_count: max_pages,
+        })
     }
 
     fn free_pages(&self) -> usize {
@@ -372,8 +376,9 @@ impl Allocator for PageAllocator {
                     return;
                 }
             }
-            self.free_list
-                .push_front(FreePage::from_page(page, 1).link())
+            self.free_list.push_front(
+                FreePage::from_page(page, 1).link(),
+            )
         }
     }
 }
@@ -387,9 +392,9 @@ impl PageManager {
     pub fn new(max_bytes: usize) -> Result<PageManager> {
         let max_pages = (max_bytes + PAGE_SIZE - 1) / PAGE_SIZE;
         Ok(PageManager {
-               use_page_lru: link::LinkHead::new(),
-               allocator: PageAllocator::new(max_pages)?,
-           })
+            use_page_lru: link::LinkHead::new(),
+            allocator: PageAllocator::new(max_pages)?,
+        })
     }
 
     pub fn allocate(&mut self, bytes: usize) -> Option<WeakRefPage> {
@@ -401,7 +406,13 @@ impl PageManager {
                 return None;
             }
         }
-        unsafe { Some(AllocatedPage::allocate(bytes, &mut self.use_page_lru, &mut self.allocator)) }
+        unsafe {
+            Some(AllocatedPage::allocate(
+                bytes,
+                &mut self.use_page_lru,
+                &mut self.allocator,
+            ))
+        }
     }
 
     fn free_old_pages(&mut self, mut lwm_pages: usize) -> bool {
@@ -492,7 +503,8 @@ impl Drop for RefPage {
 }
 
 pub struct SliceIter<'a>
-    where RefPage: 'a
+where
+    RefPage: 'a,
 {
     page: *mut AllocatedPage,
     n: usize,
@@ -516,7 +528,8 @@ impl<'a> Iterator for SliceIter<'a> {
 }
 
 pub struct SliceIterMut<'a>
-    where RefPage: 'a
+where
+    RefPage: 'a,
 {
     page: *mut AllocatedPage,
     n: usize,
@@ -556,8 +569,10 @@ fn test_iterate() {
             .unwrap()
             .upgrade()
             .unwrap();
-        assert_eq!(relative.get_slices(0).count(),
-                   5 + AllocatedPage::embed_map_len());
+        assert_eq!(
+            relative.get_slices(0).count(),
+            5 + AllocatedPage::embed_map_len()
+        );
     }
 }
 

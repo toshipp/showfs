@@ -43,10 +43,10 @@ impl Cache {
                 let page = weak.upgrade().unwrap();
                 let reader = self.file.open()?;
                 let loading_state = Rc::new(RefCell::new(LoadingState {
-                                                             reader: Some(reader),
-                                                             cached_size: 0,
-                                                             page: page,
-                                                         }));
+                    reader: Some(reader),
+                    cached_size: 0,
+                    page: page,
+                }));
                 self.state = CacheState::Loading(loading_state);
             }
             CacheState::Loading(_) => {
@@ -54,10 +54,10 @@ impl Cache {
                 if let CacheState::Loading(ref loading_state) = self.state {
                     if !loading_state.borrow().is_eof() {
                         return Ok(Box::new(LoadingReader {
-                                               size: self.size.unwrap(),
-                                               pos: 0,
-                                               state: loading_state.clone(),
-                                           }));
+                            size: self.size.unwrap(),
+                            pos: 0,
+                            state: loading_state.clone(),
+                        }));
                     }
                     let cache_size = loading_state.borrow().cached_size;
                     let weak = loading_state.borrow().page.downgrade();
@@ -69,10 +69,10 @@ impl Cache {
                 if let CacheState::Loaded(ref page, cache_size) = self.state {
                     if let Some(page) = page.upgrade() {
                         return Ok(Box::new(CacheReader {
-                                               size: cache_size,
-                                               pos: 0,
-                                               page: page,
-                                           }));
+                            size: cache_size,
+                            pos: 0,
+                            page: page,
+                        }));
                     }
                 }
                 self.state = CacheState::Empty;
@@ -196,9 +196,9 @@ impl_seek!(LoadingReader<R: Read>);
 
 impl<R: Read> Read for LoadingReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
-        let cached_size = self.state
-            .borrow_mut()
-            .read_to_at_least(self.pos + buf.len())?;
+        let cached_size = self.state.borrow_mut().read_to_at_least(
+            self.pos + buf.len(),
+        )?;
         if self.pos >= cached_size {
             return Ok(0);
         }
@@ -252,9 +252,9 @@ fn test_read() {
     }
     let open_count = Rc::new(RefCell::new(0));
     let file = Rc::new(VecFile {
-                           v: v.clone(),
-                           open_count: open_count.clone(),
-                       });
+        v: v.clone(),
+        open_count: open_count.clone(),
+    });
     let mut cache = Cache::new(page_manager.clone(), file);
 
     // first read.
