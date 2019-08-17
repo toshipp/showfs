@@ -1,6 +1,6 @@
-extern crate fuse;
-extern crate libc;
-extern crate time;
+use fuse;
+
+use time;
 
 use self::fuse::{FileAttr, FileType};
 use self::time::Timespec;
@@ -10,7 +10,7 @@ use std::io::Result;
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::path::PathBuf;
 
-use fs;
+use crate::fs;
 
 pub struct File {
     path: PathBuf,

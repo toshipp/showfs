@@ -1,5 +1,5 @@
-extern crate memmap;
-extern crate tempfile;
+use memmap;
+use tempfile;
 
 use std::io::Result;
 use std::ptr;
@@ -33,7 +33,7 @@ impl Buffer {
 fn test_buffer() {
     use std::slice;
     let b = Buffer::new(1).unwrap();
-    let mut s = unsafe { slice::from_raw_parts_mut(b.ptr(), 1) };
+    let s = unsafe { slice::from_raw_parts_mut(b.ptr(), 1) };
     s[0] = 0x10;
     assert_eq!(s[0], 0x10);
 }

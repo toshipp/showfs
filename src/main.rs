@@ -1,5 +1,5 @@
-extern crate env_logger;
-extern crate fuse;
+use env_logger;
+
 #[macro_use]
 extern crate log;
 

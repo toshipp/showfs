@@ -1,6 +1,6 @@
-extern crate libc;
+use libc;
 use super::page::{PageManager, RefPage, SliceIter, WeakRefPage};
-use fs::{File, SeekableRead};
+use crate::fs::{File, SeekableRead};
 use std::cell::RefCell;
 use std::cmp::min;
 use std::io::{Error, ErrorKind, Read, Result, Seek, SeekFrom};
@@ -148,7 +148,7 @@ struct LoadingState<R> {
 }
 
 impl<R: Read> LoadingState<R> {
-    fn get_slices(&self, pos: usize) -> SliceIter {
+    fn get_slices(&self, pos: usize) -> SliceIter<'_> {
         self.page.get_slices(pos)
     }
 
@@ -220,7 +220,7 @@ impl<R: Read> Read for LoadingReader<R> {
 
 #[test]
 fn test_read() {
-    extern crate libc;
+    use libc;
     use fuse::FileAttr;
     use std::ffi::OsStr;
     use std::io::Cursor;

@@ -1,5 +1,5 @@
-extern crate fuse;
-extern crate libc;
+use fuse;
+use libc;
 
 use self::fuse::{FileAttr, FileType};
 use std::cell::RefCell;
@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::vec::Vec;
 
-use fs;
+use crate::fs;
 mod buffer;
 mod link;
 mod page;
@@ -153,7 +153,7 @@ impl Dir {
     }
 
     fn update_cache(&self) -> Result<()> {
-        use fs::Dir;
+        use crate::fs::Dir;
         if self.dents.borrow().is_some() {
             return Ok(());
         }
@@ -336,8 +336,8 @@ impl fs::Viewer for ArchiveViewer {
 
 #[test]
 fn test_iterate_dir() {
-    use fs::Dir as FSDir;
-    use physical;
+    use crate::fs::Dir as FSDir;
+    use crate::physical;
 
     let page_manager = Rc::new(RefCell::new(
         page::PageManager::new(100 * 1024 * 1024).unwrap(),
@@ -357,8 +357,8 @@ fn test_iterate_dir() {
 
 #[test]
 fn test_file_read() {
-    use fs::File;
-    use physical;
+    use crate::fs::File;
+    use crate::physical;
     use std::fs as stdfs;
     use std::io::Read;
 

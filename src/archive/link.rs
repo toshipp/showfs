@@ -58,7 +58,7 @@ impl<T> LinkHead<T> {
         element.as_mut().unwrap().prev = &mut *self.link;
     }
 
-    pub fn iter_reverse_mut(&mut self) -> IterReverseMut<T> {
+    pub fn iter_reverse_mut(&mut self) -> IterReverseMut<'_, T> {
         IterReverseMut {
             link: self.link.prev,
             end: &mut *self.link,
@@ -68,8 +68,6 @@ impl<T> LinkHead<T> {
 }
 
 pub struct IterReverseMut<'a, T>
-where
-    T: 'a,
 {
     link: *mut Link<T>,
     end: *mut Link<T>,

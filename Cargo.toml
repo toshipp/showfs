@@ -3,6 +3,7 @@
 name = "showfs"
 version = "0.0.1"
 authors = ["toshipp <toshiq2@gmail.com>"]
+edition = "2018"
 
 [dependencies]
 libarchive3-sys = { git = "https://github.com/toshipp/libarchive3-sys", branch = "update-ffi" }

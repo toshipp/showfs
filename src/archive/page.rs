@@ -14,7 +14,7 @@ const PAGE_MAP_LEN: usize = PAGE_SIZE / 4;
 trait Allocator {
     fn base(&self) -> PagePtr;
     fn allocate(&mut self) -> Option<PagePtr>;
-    fn free(&mut self, PagePtr);
+    fn free(&mut self, _: PagePtr);
 }
 
 unsafe fn slice_from_raw_pointer<'a, T>(p: *const u8, bytes: usize) -> &'a [T] {
@@ -466,7 +466,7 @@ impl RefPage {
         WeakRefPage::new(self.page.clone())
     }
 
-    pub fn get_slices(&self, from: usize) -> SliceIter {
+    pub fn get_slices(&self, from: usize) -> SliceIter<'_> {
         let page = *self.page.borrow_mut();
         unsafe {
             page.as_mut().unwrap().update_lru();
@@ -479,7 +479,7 @@ impl RefPage {
         }
     }
 
-    pub fn get_slices_mut(&mut self, from: usize) -> SliceIterMut {
+    pub fn get_slices_mut(&mut self, from: usize) -> SliceIterMut<'_> {
         let page = *self.page.borrow_mut();
         unsafe {
             page.as_mut().unwrap().update_lru();

@@ -1,8 +1,8 @@
-extern crate libarchive3_sys;
-extern crate libc;
+use libarchive3_sys;
+use libc;
 
 use self::libarchive3_sys::ffi;
-use fs::SeekableRead;
+use crate::fs::SeekableRead;
 use std::cmp::min;
 use std::error::Error as STDError;
 use std::ffi::{CStr, CString};
@@ -342,7 +342,7 @@ impl Entry {
     }
 }
 
-pub struct RefEntry<'a, R: SeekableRead + 'a> {
+pub struct RefEntry<'a, R: SeekableRead> {
     e: Entry,
     _m: marker::PhantomData<&'a R>,
 }

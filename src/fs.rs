@@ -1,6 +1,6 @@
-extern crate fuse;
-extern crate libc;
-extern crate time;
+use fuse;
+use libc;
+use time;
 
 use self::fuse::{
     FileAttr, FileType, Filesystem, ReplyAttr, ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry,
@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::vec::Vec;
 
-use physical;
+use crate::physical;
 
 macro_rules! error_with_log {
     ($reply:expr, $e:expr) => {{
@@ -267,7 +267,7 @@ impl ShowFS {
 
 impl Filesystem for ShowFS {
     // kernel path resolving function
-    fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
+    fn lookup(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEntry) {
         // check cache.
         match self.entries.get_by_path(parent, name) {
             Some((ino, ent)) => match ent.getattr(ino) {
@@ -312,7 +312,7 @@ impl Filesystem for ShowFS {
         }
     }
 
-    fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
+    fn getattr(&mut self, _req: &Request<'_>, ino: u64, reply: ReplyAttr) {
         if let Some(ent) = self.entries.get_by_inode(ino) {
             match ent.getattr(ino) {
                 Ok(attr) => reply.attr(&TTL, &attr),
@@ -323,7 +323,7 @@ impl Filesystem for ShowFS {
         }
     }
 
-    fn open(&mut self, _req: &Request, ino: u64, flags: u32, reply: ReplyOpen) {
+    fn open(&mut self, _req: &Request<'_>, ino: u64, flags: u32, reply: ReplyOpen) {
         if flags & libc::O_RDONLY as u32 != 0 {
             // support read only.
             reply.error(libc::EINVAL);
@@ -354,7 +354,7 @@ impl Filesystem for ShowFS {
     // called when all opened fds are closed.
     fn release(
         &mut self,
-        _req: &Request,
+        _req: &Request<'_>,
         _ino: u64,
         fh: u64,
         _flags: u32,
@@ -372,7 +372,7 @@ impl Filesystem for ShowFS {
 
     fn read(
         &mut self,
-        _req: &Request,
+        _req: &Request<'_>,
         _ino: u64,
         fh: u64,
         offset: i64,
@@ -407,7 +407,7 @@ impl Filesystem for ShowFS {
         }
     }
 
-    fn opendir(&mut self, _req: &Request, ino: u64, _flags: u32, reply: ReplyOpen) {
+    fn opendir(&mut self, _req: &Request<'_>, ino: u64, _flags: u32, reply: ReplyOpen) {
         let handler = match self.entries.get_by_inode(ino) {
             Some(&Entry::Dir(ref d)) => d.open(),
             Some(_) => {
@@ -431,7 +431,7 @@ impl Filesystem for ShowFS {
         }
     }
 
-    fn releasedir(&mut self, _req: &Request, _ino: u64, fh: u64, _flags: u32, reply: ReplyEmpty) {
+    fn releasedir(&mut self, _req: &Request<'_>, _ino: u64, fh: u64, _flags: u32, reply: ReplyEmpty) {
         if self.handlers.release_dir(fh) {
             reply.ok();
         } else {
@@ -442,7 +442,7 @@ impl Filesystem for ShowFS {
 
     fn readdir(
         &mut self,
-        _req: &Request,
+        _req: &Request<'_>,
         ino: u64,
         fh: u64,
         offset: i64,
