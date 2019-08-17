@@ -1,20 +1,22 @@
-extern crate libc;
 extern crate fuse;
+extern crate libc;
 extern crate time;
 
-use self::fuse::{Filesystem, Request, ReplyData, ReplyEntry, ReplyAttr, ReplyDirectory, ReplyOpen,
-                 ReplyEmpty, FileAttr, FileType};
+use self::fuse::{
+    FileAttr, FileType, Filesystem, ReplyAttr, ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry,
+    ReplyOpen, Request,
+};
 use self::time::Timespec;
 use std::collections::HashMap;
 use std::convert::AsRef;
 use std::ffi::{OsStr, OsString};
 use std::fs;
+use std::io::{Error, ErrorKind, Result};
 use std::io::{Read, Seek, SeekFrom};
-use std::io::{Result, Error, ErrorKind};
 use std::iter;
 use std::path::{Path, PathBuf};
-use std::vec::Vec;
 use std::rc::Rc;
+use std::vec::Vec;
 
 use physical;
 
@@ -27,7 +29,7 @@ macro_rules! error_with_log {
             error!("{}:{}: {:?}", file!(), line!(), $e);
         }
         $reply.error(cerr)
-    }}
+    }};
 }
 
 // TODO: configurable?
@@ -37,8 +39,8 @@ pub trait SeekableRead: Seek + Read {}
 impl<T: Seek + Read> SeekableRead for T {}
 
 pub enum Entry {
-    File(Box<File>),
-    Dir(Box<Dir>),
+    File(Box<dyn File>),
+    Dir(Box<dyn Dir>),
 }
 
 impl Entry {
@@ -65,12 +67,12 @@ impl Entry {
 
 pub trait File {
     fn getattr(&self) -> Result<FileAttr>;
-    fn open(&self) -> Result<Box<SeekableRead>>;
+    fn open(&self) -> Result<Box<dyn SeekableRead>>;
     fn name(&self) -> &OsStr;
 }
 
 pub trait Dir {
-    fn open(&self) -> Result<Box<Iterator<Item = Result<Entry>>>>;
+    fn open(&self) -> Result<Box<dyn Iterator<Item = Result<Entry>>>>;
     fn lookup(&self, name: &OsStr) -> Result<Entry>;
     fn getattr(&self) -> Result<FileAttr>;
     fn name(&self) -> &OsStr;
@@ -119,10 +121,8 @@ impl EntryHolder {
     }
     fn register_with(&mut self, parent: u64, ent: Entry, ir: InodeReserver) {
         debug!("register {:?} with {}", ent.name(), ir.inode);
-        self.path_to_inode.insert(
-            (parent, ent.name().to_os_string()),
-            ir.inode,
-        );
+        self.path_to_inode
+            .insert((parent, ent.name().to_os_string()), ir.inode);
         self.inode_to_entry.insert(ir.inode, ent);
     }
     fn register_root(&mut self, root: Entry) {
@@ -136,8 +136,8 @@ impl EntryHolder {
 
 struct HandlerHolder {
     fh: u64, // fh counter
-    file_handlers: HashMap<u64, Box<SeekableRead>>,
-    dir_handlers: HashMap<u64, iter::Peekable<Box<Iterator<Item = Result<Entry>>>>>,
+    file_handlers: HashMap<u64, Box<dyn SeekableRead>>,
+    dir_handlers: HashMap<u64, iter::Peekable<Box<dyn Iterator<Item = Result<Entry>>>>>,
 }
 
 impl HandlerHolder {
@@ -148,7 +148,7 @@ impl HandlerHolder {
             dir_handlers: HashMap::new(),
         }
     }
-    fn register_file(&mut self, r: Box<SeekableRead>) -> u64 {
+    fn register_file(&mut self, r: Box<dyn SeekableRead>) -> u64 {
         let fh = self.fh;
         self.fh += 1;
         self.file_handlers.insert(fh, r);
@@ -160,20 +160,20 @@ impl HandlerHolder {
     {
         let fh = self.fh;
         self.fh += 1;
-        let iter: Box<Iterator<Item = Result<Entry>>> = Box::new(iter);
+        let iter: Box<dyn Iterator<Item = Result<Entry>>> = Box::new(iter);
         self.dir_handlers.insert(fh, iter.peekable());
         return fh;
     }
-    fn get_file(&self, fh: u64) -> Option<&Box<SeekableRead>> {
+    fn get_file(&self, fh: u64) -> Option<&Box<dyn SeekableRead>> {
         self.file_handlers.get(&fh)
     }
-    fn get_file_mut(&mut self, fh: u64) -> Option<&mut Box<SeekableRead>> {
+    fn get_file_mut(&mut self, fh: u64) -> Option<&mut Box<dyn SeekableRead>> {
         self.file_handlers.get_mut(&fh)
     }
     fn get_dir_mut(
         &mut self,
         fh: u64,
-    ) -> Option<&mut iter::Peekable<Box<Iterator<Item = Result<Entry>>>>> {
+    ) -> Option<&mut iter::Peekable<Box<dyn Iterator<Item = Result<Entry>>>>> {
         self.dir_handlers.get_mut(&fh)
     }
     fn release_file(&mut self, fh: u64) {
@@ -190,12 +190,14 @@ pub trait Viewer {
 }
 
 struct CompositeViewer {
-    viewers: Vec<Box<Viewer>>,
+    viewers: Vec<Box<dyn Viewer>>,
 }
 
 impl CompositeViewer {
     fn new() -> CompositeViewer {
-        CompositeViewer { viewers: Vec::new() }
+        CompositeViewer {
+            viewers: Vec::new(),
+        }
     }
 
     fn add<V: Viewer + 'static>(&mut self, v: V) {
@@ -268,18 +270,16 @@ impl Filesystem for ShowFS {
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
         // check cache.
         match self.entries.get_by_path(parent, name) {
-            Some((ino, ent)) => {
-                match ent.getattr(ino) {
-                    Ok(attr) => {
-                        reply.entry(&TTL, &attr, 0);
-                        return;
-                    }
-                    Err(e) => {
-                        error_with_log!(reply, e);
-                        return;
-                    }
+            Some((ino, ent)) => match ent.getattr(ino) {
+                Ok(attr) => {
+                    reply.entry(&TTL, &attr, 0);
+                    return;
                 }
-            }
+                Err(e) => {
+                    error_with_log!(reply, e);
+                    return;
+                }
+            },
             _ => {
                 // fallthrough
             }
@@ -375,15 +375,18 @@ impl Filesystem for ShowFS {
         _req: &Request,
         _ino: u64,
         fh: u64,
-        offset: u64,
+        offset: i64,
         size: u32,
         reply: ReplyData,
     ) {
         if let Some(reader) = self.handlers.get_file_mut(fh) {
-            if let Err(e) = reader.seek(SeekFrom::Start(offset)) {
+            if offset < 0 {
+                reply.error(libc::EINVAL);
+                return;
+            }
+            if let Err(e) = reader.seek(SeekFrom::Start(offset as u64)) {
                 error_with_log!(reply, e);
                 return;
-
             }
             let size = size as usize;
             self.buf.resize(size, 0);
@@ -415,14 +418,13 @@ impl Filesystem for ShowFS {
                 reply.error(libc::ENOENT);
                 return;
             }
-
         };
         match handler {
             Ok(dh) => {
                 let viewer = self.viewers.clone();
-                let fh = self.handlers.register_dir(
-                    dh.map(move |re| re.map(|e| viewer.view(e))),
-                );
+                let fh = self
+                    .handlers
+                    .register_dir(dh.map(move |re| re.map(|e| viewer.view(e))));
                 reply.opened(fh, 0);
             }
             Err(e) => error_with_log!(reply, e),
@@ -443,7 +445,7 @@ impl Filesystem for ShowFS {
         _req: &Request,
         ino: u64,
         fh: u64,
-        offset: u64,
+        offset: i64,
         mut reply: ReplyDirectory,
     ) {
         let h = match self.handlers.get_dir_mut(fh) {

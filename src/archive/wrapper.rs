@@ -1,15 +1,15 @@
-extern crate libc;
 extern crate libarchive3_sys;
+extern crate libc;
 
 use self::libarchive3_sys::ffi;
-use std::ffi::{CStr, CString};
-use std::marker;
-use std::ptr;
-use std::io::{Result, Error, SeekFrom, Read, Seek, ErrorKind};
-use std::error::Error as STDError;
 use fs::SeekableRead;
 use std::cmp::min;
+use std::error::Error as STDError;
+use std::ffi::{CStr, CString};
+use std::io::{Error, ErrorKind, Read, Result, Seek, SeekFrom};
+use std::marker;
 use std::path::PathBuf;
+use std::ptr;
 
 pub fn initialize() {
     unsafe { libc::setlocale(libc::LC_ALL, CString::new("").unwrap().as_ptr()) };
@@ -85,9 +85,9 @@ unsafe extern "C" fn read_callback<R: SeekableRead>(
 unsafe extern "C" fn seek_callback<R: SeekableRead>(
     raw: *mut ffi::Struct_archive,
     client_data: *mut libc::c_void,
-    offset: libc::int64_t,
+    offset: i64,
     whence: libc::c_int,
-) -> libc::int64_t {
+) -> i64 {
     let proxy = (client_data as *mut Proxy<R>).as_mut().unwrap();
     let pos = match whence {
         libc::SEEK_SET => SeekFrom::Start(offset as u64),
@@ -96,7 +96,7 @@ unsafe extern "C" fn seek_callback<R: SeekableRead>(
         _ => unreachable!(),
     };
     match proxy.seek(pos) {
-        Ok(n) => n as libc::int64_t,
+        Ok(n) => n as i64,
         Err(e) => {
             // correct?
             set_error(raw, e);
@@ -118,8 +118,7 @@ impl<R: SeekableRead> Archive<R> {
             if ffi::archive_read_support_filter_all(raw) != ffi::ARCHIVE_OK {
                 panic!("not support filter");
             }
-            if ffi::archive_read_set_seek_callback(raw, Some(seek_callback::<R>)) !=
-                ffi::ARCHIVE_OK
+            if ffi::archive_read_set_seek_callback(raw, Some(seek_callback::<R>)) != ffi::ARCHIVE_OK
             {
                 panic!("failed to set seek");
             }
@@ -169,14 +168,12 @@ impl<R: SeekableRead> Archive<R> {
                     continue;
                 }
                 ffi::ARCHIVE_FATAL => {
-                    return Some(Err(Error::new(
-                        ErrorKind::Other,
-                        unsafe { error_string(self.raw) },
-                    )));
+                    return Some(Err(Error::new(ErrorKind::Other, unsafe {
+                        error_string(self.raw)
+                    })));
                 }
                 _ => unreachable!(),
             }
-
         }
         Some(Ok(Entry::new(entry)))
     }
@@ -276,10 +273,9 @@ impl<R: SeekableRead> Reader<R> {
                     continue;
                 }
                 ffi::ARCHIVE_FATAL => {
-                    return Err(Error::new(
-                        ErrorKind::Other,
-                        unsafe { error_string(self.a.raw) },
-                    ));
+                    return Err(Error::new(ErrorKind::Other, unsafe {
+                        error_string(self.a.raw)
+                    }));
                 }
                 n if n < 0 => {
                     return Err(Error::new(
@@ -337,7 +333,7 @@ impl Entry {
         PathBuf::from(c_str.to_string_lossy().as_ref())
     }
 
-    pub fn size(&self) -> libc::int64_t {
+    pub fn size(&self) -> i64 {
         unsafe { ffi::archive_entry_size(self.entry) }
     }
 
@@ -363,7 +359,7 @@ impl<'a, R: SeekableRead> RefEntry<'a, R> {
         self.e.pathname()
     }
 
-    pub fn size(&self) -> libc::int64_t {
+    pub fn size(&self) -> i64 {
         self.e.size()
     }
 

@@ -26,7 +26,7 @@ impl fs::File for File {
     fn getattr(&self) -> Result<FileAttr> {
         stdfs::metadata(self.path.clone()).map(|m| to_fuse_file_attr(m))
     }
-    fn open(&self) -> Result<Box<fs::SeekableRead>> {
+    fn open(&self) -> Result<Box<dyn fs::SeekableRead>> {
         Ok(Box::new(stdfs::File::open(&self.path)?))
     }
     fn name(&self) -> &OsStr {
@@ -45,8 +45,8 @@ impl Dir {
 }
 
 impl fs::Dir for Dir {
-    fn open(&self) -> Result<Box<Iterator<Item = Result<fs::Entry>>>> {
-        stdfs::read_dir(&self.path).map(|rd| -> Box<Iterator<Item = Result<fs::Entry>>> {
+    fn open(&self) -> Result<Box<dyn Iterator<Item = Result<fs::Entry>>>> {
+        stdfs::read_dir(&self.path).map(|rd| -> Box<dyn Iterator<Item = Result<fs::Entry>>> {
             Box::new(DirHandler { iter: rd })
         })
     }

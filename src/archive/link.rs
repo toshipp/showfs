@@ -1,6 +1,6 @@
+use std::marker;
 use std::mem::transmute;
 use std::ptr;
-use std::marker;
 
 #[repr(C)]
 pub struct Link<T> {

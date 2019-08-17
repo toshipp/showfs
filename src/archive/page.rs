@@ -1,12 +1,12 @@
-use std::io::Result;
-use std::mem;
-use std::slice;
-use super::link;
 use super::buffer::Buffer;
+use super::link;
+use std::cell::RefCell;
+use std::io::Result;
 use std::marker::PhantomData;
+use std::mem;
 use std::ptr;
 use std::rc::Rc;
-use std::cell::RefCell;
+use std::slice;
 
 const PAGE_SIZE: usize = 4096;
 const PAGE_MAP_LEN: usize = PAGE_SIZE / 4;
@@ -69,7 +69,7 @@ struct AllocatedPage {
 
 impl AllocatedPage {
     fn calc_page_count(bytes: usize) -> (usize, usize) {
-        /// Returns (data count, rel map count)
+        // Returns (data count, rel map count)
         let data_pages = if bytes <= AllocatedPage::embed_size() {
             0
         } else {
@@ -84,7 +84,7 @@ impl AllocatedPage {
     }
 
     fn need_pages(bytes: usize) -> usize {
-        /// Returns needed pages which includes header, rel mapping, and data.
+        // Returns needed pages which includes header, rel mapping, and data.
         let (d, m) = AllocatedPage::calc_page_count(bytes);
         d + m + 1
     }
@@ -115,7 +115,7 @@ impl AllocatedPage {
         lru_head: &mut link::LinkHead<AllocatedPage>,
         allocator: &mut A,
     ) -> WeakRefPage {
-        /// if allocator can not allocate memory, this panics.
+        // if allocator can not allocate memory, this panics.
         let (data_pages, rel_map_pages) = AllocatedPage::calc_page_count(bytes);
         let map_len = if rel_map_pages > 0 {
             rel_map_pages
@@ -376,9 +376,8 @@ impl Allocator for PageAllocator {
                     return;
                 }
             }
-            self.free_list.push_front(
-                FreePage::from_page(page, 1).link(),
-            )
+            self.free_list
+                .push_front(FreePage::from_page(page, 1).link())
         }
     }
 }
@@ -515,7 +514,7 @@ where
 impl<'a> Iterator for SliceIter<'a> {
     type Item = &'a [u8];
     fn next(&mut self) -> Option<&'a [u8]> {
-        let mut page = unsafe { self.page.as_mut().unwrap() };
+        let page = unsafe { self.page.as_mut().unwrap() };
         if let Some(s) = page.as_slice_mut(self.n) {
             let offset = self.offset;
             self.n += 1;
@@ -540,7 +539,7 @@ where
 impl<'a> Iterator for SliceIterMut<'a> {
     type Item = &'a mut [u8];
     fn next(&mut self) -> Option<&'a mut [u8]> {
-        let mut page = unsafe { self.page.as_mut().unwrap() };
+        let page = unsafe { self.page.as_mut().unwrap() };
         if let Some(s) = page.as_slice_mut(self.n) {
             let offset = self.offset;
             self.n += 1;
@@ -565,7 +564,8 @@ fn test_iterate() {
         assert_eq!(direct.get_slices(0).count(), 10);
     }
     {
-        let relative = m.allocate((5 + AllocatedPage::embed_map_len()) * PAGE_SIZE)
+        let relative = m
+            .allocate((5 + AllocatedPage::embed_map_len()) * PAGE_SIZE)
             .unwrap()
             .upgrade()
             .unwrap();

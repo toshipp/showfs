@@ -1,27 +1,26 @@
 extern crate libc;
-use std::io::{Read, Seek, SeekFrom, Result, Error, ErrorKind};
-use super::page::{WeakRefPage, RefPage, PageManager, SliceIter};
-use std::cell::RefCell;
+use super::page::{PageManager, RefPage, SliceIter, WeakRefPage};
 use fs::{File, SeekableRead};
+use std::cell::RefCell;
 use std::cmp::min;
+use std::io::{Error, ErrorKind, Read, Result, Seek, SeekFrom};
 use std::rc::Rc;
-
 
 enum CacheState {
     Empty,
-    Loading(Rc<RefCell<LoadingState<Box<SeekableRead>>>>),
+    Loading(Rc<RefCell<LoadingState<Box<dyn SeekableRead>>>>),
     Loaded(WeakRefPage, usize),
 }
 
 pub struct Cache {
     page_manager: Rc<RefCell<PageManager>>,
     size: Option<usize>,
-    file: Rc<File>,
+    file: Rc<dyn File>,
     state: CacheState,
 }
 
 impl Cache {
-    pub fn new(page_manager: Rc<RefCell<PageManager>>, file: Rc<File>) -> Cache {
+    pub fn new(page_manager: Rc<RefCell<PageManager>>, file: Rc<dyn File>) -> Cache {
         Cache {
             page_manager: page_manager,
             size: None,
@@ -30,13 +29,14 @@ impl Cache {
         }
     }
 
-    pub fn make_reader(&mut self) -> Result<Box<SeekableRead>> {
+    pub fn make_reader(&mut self) -> Result<Box<dyn SeekableRead>> {
         match self.state {
             CacheState::Empty => {
                 if self.size.is_none() {
                     self.size = Some(self.file.getattr()?.size as usize);
                 }
-                let weak = self.page_manager
+                let weak = self
+                    .page_manager
                     .borrow_mut()
                     .allocate(self.size.unwrap())
                     .ok_or(Error::new(ErrorKind::Other, "oom"))?;
@@ -84,11 +84,11 @@ impl Cache {
 
 macro_rules! impl_seek {
     ($struct_: ident) => { impl_seek!{$struct_[ ]} };
-    ($struct_: ident < $($v: ident : $trait_: ident),* >) => {
-        impl_seek!{$struct_ [ $($v: $trait_)* ]}
+    ($struct_: ident < $($v: ident),* >) => {
+        impl_seek!{$struct_ [ $($v)* ]}
     };
-    ($struct_: ident [ $($v: ident : $trait_: ident),* ]) => {
-        impl<$($v: $trait_)*> Seek for $struct_<$($v)*> {
+    ($struct_: ident [ $($v: ident),* ]) => {
+        impl<$($v)*> Seek for $struct_<$($v)*> {
             fn seek(&mut self, pos: SeekFrom) -> Result<u64> {
                 match pos {
                     SeekFrom::Start(n) => self.pos = n as usize,
@@ -141,7 +141,7 @@ impl Read for CacheReader {
     }
 }
 
-struct LoadingState<R: Read> {
+struct LoadingState<R> {
     reader: Option<R>,
     cached_size: usize,
     page: RefPage,
@@ -186,19 +186,20 @@ impl<R: Read> LoadingState<R> {
     }
 }
 
-struct LoadingReader<R: Read> {
+struct LoadingReader<R> {
     size: usize,
     pos: usize,
     state: Rc<RefCell<LoadingState<R>>>,
 }
 
-impl_seek!(LoadingReader<R: Read>);
+impl_seek!(LoadingReader<R>);
 
 impl<R: Read> Read for LoadingReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
-        let cached_size = self.state.borrow_mut().read_to_at_least(
-            self.pos + buf.len(),
-        )?;
+        let cached_size = self
+            .state
+            .borrow_mut()
+            .read_to_at_least(self.pos + buf.len())?;
         if self.pos >= cached_size {
             return Ok(0);
         }
@@ -220,10 +221,10 @@ impl<R: Read> Read for LoadingReader<R> {
 #[test]
 fn test_read() {
     extern crate libc;
-    use std::mem::zeroed;
     use fuse::FileAttr;
-    use std::io::Cursor;
     use std::ffi::OsStr;
+    use std::io::Cursor;
+    use std::mem::zeroed;
     struct VecFile {
         v: Vec<u8>,
         open_count: Rc<RefCell<u8>>,
@@ -235,7 +236,7 @@ fn test_read() {
             Ok(a)
         }
 
-        fn open(&self) -> Result<Box<SeekableRead>> {
+        fn open(&self) -> Result<Box<dyn SeekableRead>> {
             *self.open_count.borrow_mut() += 1;
             Ok(Box::new(Cursor::new(self.v.clone())))
         }

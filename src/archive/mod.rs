@@ -2,21 +2,21 @@ extern crate fuse;
 extern crate libc;
 
 use self::fuse::{FileAttr, FileType};
-use std::convert::From;
-use std::ffi::OsStr;
-use std::io::{Result, Error};
-use std::path::{PathBuf, Path};
-use std::rc::Rc;
-use std::vec::Vec;
 use std::cell::RefCell;
 use std::collections::HashSet;
+use std::convert::From;
+use std::ffi::OsStr;
+use std::io::{Error, Result};
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
+use std::vec::Vec;
 
 use fs;
-mod wrapper;
 mod buffer;
-mod page;
 mod link;
+mod page;
 mod reader;
+mod wrapper;
 
 fn to_fuse_file_type(file_type: libc::mode_t) -> FileType {
     match file_type & libc::S_IFMT {
@@ -30,7 +30,7 @@ fn to_fuse_file_type(file_type: libc::mode_t) -> FileType {
     }
 }
 
-fn to_fuse_file_attr(size: libc::int64_t, file_type: libc::mode_t, attr: FileAttr) -> FileAttr {
+fn to_fuse_file_attr(size: i64, file_type: libc::mode_t, attr: FileAttr) -> FileAttr {
     FileAttr {
         ino: 0, // dummy
         size: size as u64,
@@ -50,13 +50,13 @@ fn to_fuse_file_attr(size: libc::int64_t, file_type: libc::mode_t, attr: FileAtt
 }
 
 struct ArchivedFile {
-    archive: Rc<Box<fs::File>>,
+    archive: Rc<Box<dyn fs::File>>,
     attr: FileAttr,
     path: PathBuf,
 }
 
 impl ArchivedFile {
-    fn new(archive: Rc<Box<fs::File>>, attr: FileAttr, path: PathBuf) -> ArchivedFile {
+    fn new(archive: Rc<Box<dyn fs::File>>, attr: FileAttr, path: PathBuf) -> ArchivedFile {
         ArchivedFile {
             archive: archive,
             attr: attr,
@@ -70,13 +70,11 @@ impl fs::File for ArchivedFile {
         Ok(self.attr)
     }
 
-    fn open(&self) -> Result<Box<fs::SeekableRead>> {
+    fn open(&self) -> Result<Box<dyn fs::SeekableRead>> {
         let archive = wrapper::Archive::new(self.archive.open()?);
-        let reader = archive.find_open(|e| e.pathname() == self.path).unwrap_or(
-            Err(
-                Error::from_raw_os_error(libc::ENOENT),
-            ),
-        )?;
+        let reader = archive
+            .find_open(|e| e.pathname() == self.path)
+            .unwrap_or(Err(Error::from_raw_os_error(libc::ENOENT)))?;
         Ok(Box::new(reader))
     }
 
@@ -100,13 +98,12 @@ impl CacheFile {
     }
 }
 
-
 impl fs::File for CacheFile {
     fn getattr(&self) -> Result<FileAttr> {
         self.file.getattr()
     }
 
-    fn open(&self) -> Result<Box<fs::SeekableRead>> {
+    fn open(&self) -> Result<Box<dyn fs::SeekableRead>> {
         self.cache.borrow_mut().make_reader()
     }
 
@@ -121,7 +118,7 @@ struct DirEntry {
 }
 
 pub struct Dir {
-    archive: Rc<Box<fs::File>>,
+    archive: Rc<Box<dyn fs::File>>,
     path: PathBuf,
     attr: RefCell<Option<FileAttr>>,
     dents: RefCell<Option<Rc<Vec<DirEntry>>>>,
@@ -129,7 +126,7 @@ pub struct Dir {
 }
 
 impl Dir {
-    pub fn new(f: Box<fs::File>, page_manager: Rc<RefCell<page::PageManager>>) -> Self {
+    pub fn new(f: Box<dyn fs::File>, page_manager: Rc<RefCell<page::PageManager>>) -> Self {
         Dir {
             archive: Rc::new(f),
             path: PathBuf::new(),
@@ -140,7 +137,7 @@ impl Dir {
     }
 
     fn from_parts(
-        f: Rc<Box<fs::File>>,
+        f: Rc<Box<dyn fs::File>>,
         path: PathBuf,
         attr: FileAttr,
         dents: Rc<Vec<DirEntry>>,
@@ -199,7 +196,7 @@ impl Dir {
 }
 
 impl fs::Dir for Dir {
-    fn open(&self) -> Result<Box<Iterator<Item = Result<fs::Entry>>>> {
+    fn open(&self) -> Result<Box<dyn Iterator<Item = Result<fs::Entry>>>> {
         self.update_cache()?;
         Ok(Box::new(DirHandler::open(self)))
     }
@@ -219,11 +216,7 @@ impl fs::Dir for Dir {
                     ))));
                 } else {
                     return Ok(fs::Entry::File(Box::new(CacheFile::new(
-                        ArchivedFile::new(
-                            self.archive.clone(),
-                            e.attr,
-                            lookup_path.clone(),
-                        ),
+                        ArchivedFile::new(self.archive.clone(), e.attr, lookup_path.clone()),
                         self.page_manager.clone(),
                     ))));
                 }
@@ -251,7 +244,7 @@ impl fs::Dir for Dir {
 }
 
 struct DirHandler {
-    archive: Rc<Box<fs::File>>,
+    archive: Rc<Box<dyn fs::File>>,
     path: PathBuf,
     dents: Rc<Vec<DirEntry>>,
     i: usize,
@@ -322,13 +315,11 @@ impl fs::Viewer for ArchiveViewer {
         let is_archive = match e {
             fs::Entry::File(ref f) => {
                 match Path::new(f.name()).extension().and_then(|ext| ext.to_str()) {
-                    Some(ext) => {
-                        match ext.to_lowercase().as_str() {
-                            "zip" => true,
-                            "rar" => true,
-                            _ => false,
-                        }
-                    }
+                    Some(ext) => match ext.to_lowercase().as_str() {
+                        "zip" => true,
+                        "rar" => true,
+                        _ => false,
+                    },
                     _ => false,
                 }
             }
@@ -343,11 +334,10 @@ impl fs::Viewer for ArchiveViewer {
     }
 }
 
-
 #[test]
 fn test_iterate_dir() {
-    use physical;
     use fs::Dir as FSDir;
+    use physical;
 
     let page_manager = Rc::new(RefCell::new(
         page::PageManager::new(100 * 1024 * 1024).unwrap(),
@@ -356,9 +346,9 @@ fn test_iterate_dir() {
     let zip = root.join("assets/test.zip");
     let zip_dir = Dir::new(Box::new(physical::File::new(zip)), page_manager.clone());
     let entries: Vec<_> = zip_dir.open().unwrap().map(|re| re.unwrap()).collect();
-    assert!(entries.iter().all(|e| {
-        e.file_type(0).unwrap() == FileType::RegularFile
-    }));
+    assert!(entries
+        .iter()
+        .all(|e| { e.file_type(0).unwrap() == FileType::RegularFile }));
     let mut names: Vec<_> = entries.iter().map(|e| PathBuf::from(e.name())).collect();
     names.sort();
     let expect = vec![PathBuf::from("large"), PathBuf::from("small")];
@@ -367,9 +357,9 @@ fn test_iterate_dir() {
 
 #[test]
 fn test_file_read() {
-    use std::fs as stdfs;
     use fs::File;
     use physical;
+    use std::fs as stdfs;
     use std::io::Read;
 
     let assets = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets");

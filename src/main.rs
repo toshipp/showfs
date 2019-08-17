@@ -6,8 +6,8 @@ extern crate log;
 use std::iter::FromIterator;
 use std::vec::Vec;
 
-mod fs;
 mod archive;
+mod fs;
 mod physical;
 
 fn main() {
