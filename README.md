@@ -1,4 +1,4 @@
-[![wercker status](https://app.wercker.com/status/1e436817198aa6ce7b3f47b3cd1ca9c4/s/master "wercker status")](https://app.wercker.com/project/byKey/1e436817198aa6ce7b3f47b3cd1ca9c4)
+[![CircleCI](https://circleci.com/gh/toshipp/showfs.svg?style=svg)](https://circleci.com/gh/toshipp/showfs)
 
 showfs - mount an archive as a directory.
 -----------------------------------------
