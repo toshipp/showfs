@@ -9,6 +9,9 @@ jobs:
           apt-get update
           apt-get install -y build-essential pkg-config libfuse-dev libarchive-dev python3
       - run: |
+          cargo install cargo-audit
+          cargo audit -D
+      - run: |
           ./tool/make_assets.py
           cargo test --all
 
