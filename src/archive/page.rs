@@ -189,7 +189,7 @@ impl AllocatedPage {
         }
 
         AllocatedPage::deallocate_pages_one(&header.map()[..map_len], allocator);
-        mem::drop(mem::replace(header, mem::uninitialized()));
+        ptr::drop_in_place(raw);
         allocator.free(PagePtr::new(raw as *mut u8));
     }
 
@@ -311,7 +311,7 @@ impl FreePage {
         self.count -= 1;
         if self.count == 0 {
             self.link.unlink();
-            mem::drop(mem::replace(self, mem::uninitialized()));
+            ptr::drop_in_place(self);
         }
         top
     }
